@@ -1,0 +1,13 @@
+project_id = "jhriejxeovvbmeyilddw"
+
+[functions.get-video-access]
+verify_jwt = false
+
+[functions.admin-videos]
+verify_jwt = false
+
+[functions.create-paypal-order]
+verify_jwt = false
+
+[functions.capture-paypal-payment]
+verify_jwt = false
