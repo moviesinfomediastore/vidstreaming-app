@@ -186,7 +186,7 @@ export default function VideoPage() {
     fetchVideoForCallback();
   }, [slug, searchParams]);
 
-  const getSignedUrl = async (path: string, fullAccess: boolean, videoId: string, sessionToken?: string): Promise<string | null> => {
+  const getSignedUrl = async (_path: string, fullAccess: boolean, videoId: string, sessionToken?: string): Promise<string | null> => {
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
       const response = await fetch(
@@ -198,15 +198,21 @@ export default function VideoPage() {
         }
       );
       const result = await response.json();
-      if (result.url) return result.url;
+      if (result.url) {
+        // Auto-refresh preview URLs before they expire (60s expiry, refresh at 45s)
+        if (!fullAccess && result.expiresIn) {
+          const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
+          setTimeout(async () => {
+            const freshUrl = await getSignedUrl(_path, false, videoId);
+            if (freshUrl) setVideoUrl(freshUrl);
+          }, refreshMs);
+        }
+        return result.url;
+      }
       return null;
     } catch {
-      if (path) {
-        const { data } = await supabase.storage
-          .from('videos')
-          .createSignedUrl(path, 3600);
-        return data?.signedUrl || null;
-      }
+      // Do NOT fall back to client-side signed URLs — that bypasses payment validation
+      console.error('Failed to get video access URL');
       return null;
     }
   };

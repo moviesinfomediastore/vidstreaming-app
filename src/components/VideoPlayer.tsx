@@ -159,12 +159,15 @@ export default function VideoPlayer({
         ref={videoRef}
         src={videoUrl}
         className="w-full aspect-video object-contain bg-black"
+        style={{ userSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={() => setDuration(videoRef.current?.duration || 0)}
         onContextMenu={(e) => e.preventDefault()}
+        onDragStart={(e) => e.preventDefault()}
         playsInline
-        controlsList="nodownload"
+        controlsList="nodownload nofullscreen noremoteplayback"
         disablePictureInPicture
+        crossOrigin="anonymous"
       />
 
       {/* Custom controls overlay */}

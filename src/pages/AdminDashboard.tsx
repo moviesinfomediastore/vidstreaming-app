@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
@@ -359,18 +363,28 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this video?')) return;
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    await fetch(
-      `https://${projectId}.supabase.co/functions/v1/admin-videos`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', id, adminToken: sessionStorage.getItem('ppv_admin') }),
-      }
-    );
-    fetchVideos();
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTargetId) return;
+    try {
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const res = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/admin-videos`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', id: deleteTargetId, adminToken: sessionStorage.getItem('ppv_admin') }),
+        }
+      );
+      if (!res.ok) throw new Error('Delete failed');
+      toast({ title: 'Deleted', description: 'Video has been removed.' });
+      fetchVideos();
+    } catch {
+      toast({ title: 'Error', description: 'Failed to delete video.', variant: 'destructive' });
+    } finally {
+      setDeleteTargetId(null);
+    }
   };
 
   const editVideo = (v: VideoRecord) => {
@@ -552,7 +566,7 @@ export default function AdminDashboard() {
                     <Button size="icon" variant="ghost" onClick={() => editVideo(v)}>
                       <Edit2 className="w-4 h-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => handleDelete(v.id)}>
+                    <Button size="icon" variant="ghost" onClick={() => setDeleteTargetId(v.id)}>
                       <Trash2 className="w-4 h-4 text-destructive" />
                     </Button>
                   </div>
@@ -605,6 +619,25 @@ export default function AdminDashboard() {
           </Card>
         )}
       </main>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Video</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this video? This action cannot be undone.
+              The video file and thumbnail will also be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

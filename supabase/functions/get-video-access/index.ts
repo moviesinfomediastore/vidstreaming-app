@@ -33,8 +33,11 @@ serve(async (req) => {
       });
     }
 
-    // If full access requested, validate session token
+    // Determine access level and URL expiry
+    let isFullAccess = false;
+
     if (fullAccess && sessionToken) {
+      // Validate payment session for full access
       const { data: payment } = await supabase
         .from('payments')
         .select('id')
@@ -49,12 +52,26 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
+      isFullAccess = true;
+    } else if (fullAccess) {
+      // Full access requested but no valid session token
+      return new Response(JSON.stringify({ error: 'Payment required' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    // Generate signed URL (1 hour expiry)
+    // Preview: short-lived URL (60s) — harder to share/download
+    // Full access: longer URL (1 hour) for comfortable viewing
+    const expirySeconds = isFullAccess ? 3600 : 60;
+
+
+
     const { data: signedUrl, error: signError } = await supabase.storage
       .from('videos')
-      .createSignedUrl(video.video_path, 3600);
+      .createSignedUrl(video.video_path, expirySeconds, {
+        download: false,
+      });
 
     if (signError || !signedUrl) {
       return new Response(JSON.stringify({ error: 'Could not generate URL' }), {
@@ -63,7 +80,11 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ url: signedUrl.signedUrl }), {
+    return new Response(JSON.stringify({
+      url: signedUrl.signedUrl,
+      expiresIn: expirySeconds,
+      isFullAccess,
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
