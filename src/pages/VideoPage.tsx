@@ -310,9 +310,9 @@ export default function VideoPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <main className="flex-1 w-full">
-        {/* Video player — edge-to-edge on mobile */}
+        {/* Video player — centered with padding on all devices */}
         <div className="w-full max-w-5xl mx-auto">
-          <div className="sm:px-4 lg:px-6 sm:pt-4 lg:pt-6">
+          <div className="px-3 pt-3 sm:px-4 sm:pt-4 lg:px-6 lg:pt-6">
             {videoUrl && (
               <VideoPlayer
                 videoUrl={videoUrl}
