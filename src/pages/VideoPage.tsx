@@ -20,6 +20,9 @@ interface Video {
   thumbnail_path: string | null;
   duration_minutes: number | null;
   is_published: boolean;
+  chunk_count: number | null;
+  total_bytes: number | null;
+  chunk_prefix: string | null;
 }
 
 export default function VideoPage() {
@@ -29,7 +32,6 @@ export default function VideoPage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [isHls, setIsHls] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -97,11 +99,8 @@ export default function VideoPage() {
         });
 
         // Get full video URL
-        const fullAccess = await getSignedUrl(videoData.video_path || '', true, videoData.id, result.sessionToken);
-        if (fullAccess) {
-          setVideoUrl(fullAccess.url);
-          setIsHls(fullAccess.isHls);
-        }
+        const fullUrl = await getSignedUrl(videoData.video_path || '', true, videoData.id, result.sessionToken);
+        if (fullUrl) setVideoUrl(fullUrl);
 
         setTimeout(() => setPaymentSuccess(false), 5000);
       } else {
@@ -144,30 +143,23 @@ export default function VideoPage() {
         return;
       }
 
-      setVideo(data);
+      setVideo(data as unknown as Video);
       trackEvent(data.id, 'page_visit');
 
       // Check existing session
       const sessionToken = getSessionToken(data.id);
       if (sessionToken) {
-        const fullAccess = await getSignedUrl(data.video_path || '', true, data.id, sessionToken);
-        if (fullAccess) {
-          setVideoUrl(fullAccess.url);
-          setIsHls(fullAccess.isHls);
+        const fullUrl = await getSignedUrl(data.video_path || '', true, data.id, sessionToken, data as unknown as Video);
+        if (fullUrl) {
+          setVideoUrl(fullUrl);
           setIsUnlocked(true);
         } else {
-          const preview = await getSignedUrl(data.video_path || '', false, data.id);
-          if (preview) {
-             setVideoUrl(preview.url);
-             setIsHls(preview.isHls);
-          }
+          const previewUrl = await getSignedUrl(data.video_path || '', false, data.id, undefined, data as unknown as Video);
+          setVideoUrl(previewUrl);
         }
       } else {
-        const preview = await getSignedUrl(data.video_path || '', false, data.id);
-        if (preview) {
-           setVideoUrl(preview.url);
-           setIsHls(preview.isHls);
-        }
+        const previewUrl = await getSignedUrl(data.video_path || '', false, data.id, undefined, data as unknown as Video);
+        setVideoUrl(previewUrl);
       }
       setLoading(false);
     };
@@ -188,21 +180,28 @@ export default function VideoPage() {
         .single();
 
       if (data) {
-        setVideo(data);
-        const preview = await getSignedUrl(data.video_path || '', false, data.id);
-        if (preview) {
-           setVideoUrl(preview.url);
-           setIsHls(preview.isHls);
-        }
+        setVideo(data as unknown as Video);
+        const previewUrl = await getSignedUrl(data.video_path || '', false, data.id, undefined, data as unknown as Video);
+        setVideoUrl(previewUrl);
         setLoading(false);
       }
     };
     fetchVideoForCallback();
   }, [slug, searchParams]);
 
-  const getSignedUrl = async (_path: string, fullAccess: boolean, videoId: string, sessionToken?: string): Promise<{ url: string, isHls: boolean } | null> => {
+  const getSignedUrl = async (_path: string, fullAccess: boolean, videoId: string, sessionToken?: string, videoData?: Video | null): Promise<string | null> => {
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+
+      // For chunked videos, use stream-video Edge Function
+      const v = videoData || video;
+      if (v && v.chunk_count && v.chunk_prefix) {
+        const params = new URLSearchParams({ id: videoId, access: fullAccess ? 'full' : 'preview' });
+        if (sessionToken) params.set('token', sessionToken);
+        return `https://${projectId}.supabase.co/functions/v1/stream-video?${params.toString()}`;
+      }
+
+      // Legacy: use get-video-access for single-file videos
       const response = await fetch(
         `https://${projectId}.supabase.co/functions/v1/get-video-access`,
         {
@@ -212,37 +211,16 @@ export default function VideoPage() {
         }
       );
       const result = await response.json();
-      
-      if (result.playlistText) {
-        const blob = new Blob([result.playlistText], { type: 'application/vnd.apple.mpegurl' });
-        const blobUrl = URL.createObjectURL(blob);
-        
-        if (!fullAccess && result.expiresIn) {
-          const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
-          setTimeout(async () => {
-            const fresh = await getSignedUrl(_path, false, videoId);
-            if (fresh) {
-              setVideoUrl(fresh.url);
-              setIsHls(fresh.isHls);
-            }
-          }, refreshMs);
-        }
-        return { url: blobUrl, isHls: true };
-      }
-
       if (result.url) {
         // Auto-refresh preview URLs before they expire (60s expiry, refresh at 45s)
         if (!fullAccess && result.expiresIn) {
           const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
           setTimeout(async () => {
-            const fresh = await getSignedUrl(_path, false, videoId);
-            if (fresh) {
-               setVideoUrl(fresh.url);
-               setIsHls(fresh.isHls);
-            }
+            const freshUrl = await getSignedUrl(_path, false, videoId);
+            if (freshUrl) setVideoUrl(freshUrl);
           }, refreshMs);
         }
-        return { url: result.url, isHls: false };
+        return result.url;
       }
       return null;
     } catch {
@@ -287,11 +265,8 @@ export default function VideoPage() {
           description: 'PayPal is not configured. Video unlocked in demo mode.',
         });
 
-        const fullAccess = await getSignedUrl(video.video_path || '', true, video.id, sessionToken);
-        if (fullAccess) {
-           setVideoUrl(fullAccess.url);
-           setIsHls(fullAccess.isHls);
-        }
+        const fullUrl = await getSignedUrl(video.video_path || '', true, video.id, sessionToken);
+        if (fullUrl) setVideoUrl(fullUrl);
 
         setTimeout(() => setPaymentSuccess(false), 5000);
       } else {
@@ -339,7 +314,6 @@ export default function VideoPage() {
             {videoUrl && (
               <VideoPlayer
                 videoUrl={videoUrl}
-                isHls={isHls}
                 previewDuration={video.preview_duration_seconds}
                 isUnlocked={isUnlocked}
                 videoId={video.id}

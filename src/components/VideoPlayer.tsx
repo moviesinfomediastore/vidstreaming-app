@@ -1,11 +1,9 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
 import { trackEvent } from '@/lib/analytics';
-import Hls from 'hls.js';
 
 interface VideoPlayerProps {
   videoUrl: string;
-  isHls?: boolean;
   previewDuration: number;
   isUnlocked: boolean;
   videoId: string;
@@ -15,7 +13,6 @@ interface VideoPlayerProps {
 
 export default function VideoPlayer({
   videoUrl,
-  isHls = false,
   previewDuration,
   isUnlocked,
   videoId,
@@ -85,31 +82,8 @@ export default function VideoPlayer({
       }
     };
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({
-         maxBufferSize: 0,
-         maxBufferLength: 30,
-         startPosition: -1
-      });
-      hls.loadSource(videoUrl);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        tryAutoplay();
-      });
-
-      return () => {
-        hls.destroy();
-      };
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || !isHls) {
-      // For Safari native HLS or fallback mp4
-      video.src = videoUrl;
-      video.addEventListener('loadedmetadata', tryAutoplay);
-      return () => {
-         video.removeEventListener('loadedmetadata', tryAutoplay);
-         video.src = '';
-      }
-    }
-  }, [videoUrl, videoId, hasStarted, isHls]);
+    tryAutoplay();
+  }, [videoUrl, videoId, hasStarted]);
 
   useEffect(() => {
     if (isUnlocked && previewEnded) {
@@ -183,6 +157,7 @@ export default function VideoPlayer({
     >
       <video
         ref={videoRef}
+        src={videoUrl}
         className="w-full aspect-video object-contain bg-black"
         style={{ userSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
         onTimeUpdate={handleTimeUpdate}

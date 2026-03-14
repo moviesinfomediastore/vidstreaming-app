@@ -12,8 +12,6 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import {
   Plus, Trash2, Edit2, BarChart3, Video, Eye, Play,
   DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link
@@ -99,9 +97,12 @@ export default function AdminDashboard() {
 
   // Background upload state
   const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
-  const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'processing' | 'uploading' | 'done' | 'error'>('idle');
+  const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [uploadedVideoPath, setUploadedVideoPath] = useState<string | null>(null);
+  const [uploadChunkMeta, setUploadChunkMeta] = useState<{ chunk_count: number; total_bytes: number; chunk_prefix: string } | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
+
+  const CHUNK_SIZE = 45 * 1024 * 1024; // 45MB — must match stream-video edge function
 
   useEffect(() => {
     if (!sessionStorage.getItem('ppv_admin')) {
@@ -144,116 +145,70 @@ export default function AdminDashboard() {
   };
 
   const startBackgroundUpload = async (file: File) => {
-    setVideoUploadStatus('processing');
+    setVideoUploadStatus('uploading');
     setVideoUploadProgress(0);
     setUploadedVideoPath(null);
+    setUploadChunkMeta(null);
 
     const slug = form.slug || 'video-' + Date.now();
-    const folderPath = `${slug}-${Date.now()}`;
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    const adminToken = sessionStorage.getItem('ppv_admin');
+    const chunkPrefix = `${slug}-${Date.now()}/`;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const abortController = new AbortController();
+    uploadAbortRef.current = abortController;
 
     try {
-      // Step 1: Initialize FFmpeg and segment video into HLS
-      const ffmpeg = new FFmpeg();
-      
-      ffmpeg.on('progress', ({ progress }) => {
-        setVideoUploadProgress(Math.round(progress * 100));
-      });
+      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+      const adminToken = sessionStorage.getItem('ppv_admin');
 
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
+      for (let i = 0; i < totalChunks; i++) {
+        if (abortController.signal.aborted) throw new Error('Upload aborted');
 
-      await ffmpeg.writeFile('input.mp4', await fetchFile(file));
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunkBlob = file.slice(start, end);
+        const chunkName = `chunk_${String(i).padStart(4, '0')}`;
+        const storagePath = `${chunkPrefix}${chunkName}`;
 
-      // Execute HLS segmentation (extremely fast because -codec copy)
-      await ffmpeg.exec([
-        '-i', 'input.mp4',
-        '-codec', 'copy',
-        '-hls_time', '5',
-        '-hls_list_size', '0',
-        '-hls_segment_filename', 'chunk_%03d.ts',
-        '-f', 'hls',
-        'index.m3u8'
-      ]);
-
-      // Step 2: Read output files
-      setVideoUploadStatus('uploading');
-      setVideoUploadProgress(0);
-      
-      const m3u8Data = await ffmpeg.readFile('index.m3u8');
-      const m3u8Text = new TextDecoder().decode(m3u8Data as Uint8Array);
-      const tsFiles = m3u8Text.split('\n').filter(line => line.trim().endsWith('.ts'));
-
-      const filesToUpload: { name: string, data: Uint8Array, type: string, path: string }[] = [];
-      
-      filesToUpload.push({
-        name: 'index.m3u8',
-        data: m3u8Data as Uint8Array,
-        type: 'application/x-mpegURL',
-        path: `${folderPath}/index.m3u8`
-      });
-
-      for (const tsFile of tsFiles) {
-        filesToUpload.push({
-          name: tsFile.trim(),
-          data: await ffmpeg.readFile(tsFile.trim()) as Uint8Array,
-          type: 'video/mp2t',
-          path: `${folderPath}/${tsFile.trim()}`
-        });
-      }
-
-      // Step 3: Get signed URLs for all chunks at once
-      const storagePaths = filesToUpload.map(f => f.path);
-      const signRes = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/admin-upload`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ adminToken, bucket: 'videos', storagePaths }),
-        }
-      );
-      const signData = await signRes.json();
-      if (signData.error) throw new Error(signData.error);
-
-      // Step 4: Upload all chunks in parallel (with concurrency limit)
-      let uploadedCount = 0;
-      const MAX_CONCURRENT = 5;
-      
-      for (let i = 0; i < signData.urls.length; i += MAX_CONCURRENT) {
-        const batch = signData.urls.slice(i, i + MAX_CONCURRENT);
-        await Promise.all(
-          batch.map(async (urlObj: any) => {
-            if (urlObj.error) throw new Error(`Signed URL error: ${urlObj.error}`);
-            const fileObj = filesToUpload.find(f => f.path === urlObj.path);
-            if (!fileObj) return;
-
-            const uploadRes = await fetch(urlObj.signedUrl, {
-              method: 'PUT',
-              headers: { 'Content-Type': fileObj.type },
-              body: fileObj.data as any,
-            });
-
-            if (!uploadRes.ok) throw new Error(`Failed to upload ${fileObj.name}`);
-            
-            uploadedCount++;
-            setVideoUploadProgress(Math.round((uploadedCount / filesToUpload.length) * 100));
-          })
+        // Get signed upload URL for this chunk
+        const signRes = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/admin-upload`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ adminToken, bucket: 'videos', storagePath, contentType: file.type || 'video/mp4' }),
+            signal: abortController.signal,
+          }
         );
-      }
+        const signData = await signRes.json();
+        if (signData.error) throw new Error(signData.error);
 
-      // Clean up ffmpeg memory
-      ffmpeg.terminate();
+        // Upload the chunk directly to the signed URL
+        const uploadRes = await fetch(signData.signedUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'video/mp4' },
+          body: chunkBlob,
+          signal: abortController.signal,
+        });
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text().catch(() => uploadRes.statusText);
+          throw new Error(`Chunk ${i + 1}/${totalChunks} upload failed: ${errText}`);
+        }
+
+        // Update progress
+        const pct = Math.round(((i + 1) / totalChunks) * 100);
+        setVideoUploadProgress(pct);
+      }
 
       setVideoUploadStatus('done');
-      // Store the master m3u8 path as the primary video path
-      setUploadedVideoPath(`${folderPath}/index.m3u8`);
-      toast({ title: 'Upload complete', description: 'HLS video chunks uploaded successfully.' });
+      setUploadedVideoPath(chunkPrefix); // Store the prefix, not a single file path
+      setUploadChunkMeta({
+        chunk_count: totalChunks,
+        total_bytes: file.size,
+        chunk_prefix: chunkPrefix,
+      });
+      toast({ title: 'Video uploaded', description: `Video uploaded in ${totalChunks} chunks successfully.` });
     } catch (err: any) {
-      if (err.message === 'Upload aborted') return;
+      if (err.message === 'Upload aborted' || abortController.signal.aborted) return;
       setVideoUploadStatus('error');
       toast({ title: 'Upload failed', description: err.message, variant: 'destructive' });
     }
@@ -355,6 +310,11 @@ export default function AdminDashboard() {
               is_published: form.is_published,
               ...(videoPath && { video_path: videoPath }),
               ...(thumbnailPath && { thumbnail_path: thumbnailPath }),
+              ...(uploadChunkMeta && {
+                chunk_count: uploadChunkMeta.chunk_count,
+                total_bytes: uploadChunkMeta.total_bytes,
+                chunk_prefix: uploadChunkMeta.chunk_prefix,
+              }),
             },
           }),
         }
@@ -544,15 +504,6 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Upload className="w-4 h-4 animate-pulse text-primary" />
                         <span>Uploading... {videoUploadProgress}%</span>
-                      </div>
-                      <Progress value={videoUploadProgress} className="h-2" />
-                    </div>
-                  )}
-                  {videoUploadStatus === 'processing' && (
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Video className="w-4 h-4 animate-pulse text-primary" />
-                        <span>Segmenting Video (HLS)... {videoUploadProgress}%</span>
                       </div>
                       <Progress value={videoUploadProgress} className="h-2" />
                     </div>
