@@ -12,6 +12,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
+import * as tus from 'tus-js-client';
 import {
   Plus, Trash2, Edit2, BarChart3, Video, Eye, Play,
   DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link
@@ -166,32 +167,44 @@ export default function AdminDashboard() {
       const signData = await signRes.json();
       if (signData.error) throw new Error(signData.error);
 
-      // Step 2: Upload directly to storage using signed URL with progress tracking
+      // Step 2: Upload using TUS resumable protocol to bypass 50MB Cloudflare payload limits
+      // We pass the signed URL token via Authorization header
       await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        uploadAbortRef.current = { abort: () => xhr.abort() } as any;
-
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            setVideoUploadProgress(pct);
-          }
-        });
-
-        xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
+        const upload = new tus.Upload(file, {
+          endpoint: `https://${projectId}.supabase.co/storage/v1/upload/resumable`,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            authorization: `Bearer ${signData.token}`,
+            'x-upsert': 'true',
+          },
+          uploadDataDuringCreation: true,
+          metadata: {
+            bucketName: 'videos',
+            objectName: storagePath,
+            contentType: file.type || 'video/mp4',
+            cacheControl: '3600',
+          },
+          chunkSize: 6 * 1024 * 1024, // 6MB chunks
+          onError: (error) => {
+            console.error('TUS upload error:', error);
+            reject(new Error('Upload failed: ' + error.message));
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            if (bytesTotal) {
+              const pct = Math.round((bytesUploaded / bytesTotal) * 100);
+              setVideoUploadProgress(pct);
+            }
+          },
+          onSuccess: () => {
             resolve();
-          } else {
-            reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
-          }
+          },
         });
-        xhr.addEventListener('error', () => reject(new Error('Upload failed')));
-        xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
-        // Upload directly to the signed URL
-        xhr.open('PUT', signData.signedUrl);
-        xhr.setRequestHeader('Content-Type', file.type);
-        xhr.send(file);
+        // Save abort controller functionality
+        uploadAbortRef.current = { abort: () => upload.abort() } as any;
+
+        // Start upload
+        upload.start();
       });
 
       setVideoUploadStatus('done');
