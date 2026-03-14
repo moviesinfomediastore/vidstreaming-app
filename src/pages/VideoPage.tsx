@@ -6,7 +6,7 @@ import { getSessionToken, setSessionToken } from '@/lib/visitor';
 import VideoPlayer from '@/components/VideoPlayer';
 import PaywallOverlay from '@/components/PaywallOverlay';
 import Footer from '@/components/Footer';
-import { Clock, DollarSign, CheckCircle, Play } from 'lucide-react';
+import { Clock, DollarSign, CheckCircle, Play, Eye, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Video {
@@ -36,6 +36,8 @@ export default function VideoPage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [viewCount, setViewCount] = useState(0);
+  const [purchaseCount, setPurchaseCount] = useState(0);
 
   // Handle PayPal return callback
   useEffect(() => {
@@ -145,6 +147,16 @@ export default function VideoPage() {
 
       setVideo(data as unknown as Video);
       trackEvent(data.id, 'page_visit');
+
+      // Fetch social proof counts
+      const { data: events } = await supabase
+        .from('video_analytics')
+        .select('event_type')
+        .eq('video_id', data.id);
+      if (events) {
+        setViewCount(events.filter(e => e.event_type === 'page_visit').length);
+        setPurchaseCount(events.filter(e => e.event_type === 'payment_completed').length);
+      }
 
       // Check existing session
       const sessionToken = getSessionToken(data.id);
@@ -351,6 +363,18 @@ export default function VideoPage() {
           </h1>
 
           <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-2 sm:mt-3 text-sm text-muted-foreground">
+            {viewCount > 0 && (
+              <span className="flex items-center gap-1.5">
+                <Eye className="w-4 h-4" />
+                {viewCount.toLocaleString()} {viewCount === 1 ? 'view' : 'views'}
+              </span>
+            )}
+            {purchaseCount > 0 && (
+              <span className="flex items-center gap-1.5 text-success">
+                <Users className="w-4 h-4" />
+                {purchaseCount.toLocaleString()} {purchaseCount === 1 ? 'purchase' : 'purchases'}
+              </span>
+            )}
             {video.duration_minutes && (
               <span className="flex items-center gap-1.5">
                 <Clock className="w-4 h-4" />

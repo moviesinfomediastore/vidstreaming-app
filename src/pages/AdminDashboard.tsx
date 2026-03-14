@@ -14,7 +14,8 @@ import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
 import {
   Plus, Trash2, Edit2, BarChart3, Video, Eye, Play,
-  DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link
+  DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link,
+  Receipt, RefreshCw
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -32,6 +33,18 @@ interface VideoRecord {
   duration_minutes: number | null;
   is_published: boolean;
   created_at: string;
+}
+
+interface PaymentRecord {
+  id: string;
+  video_id: string;
+  paypal_order_id: string | null;
+  amount: number;
+  status: string;
+  payer_email: string | null;
+  session_token: string;
+  created_at: string;
+  video_title?: string;
 }
 
 interface AnalyticsSummary {
@@ -85,6 +98,7 @@ export default function AdminDashboard() {
   const [detailedAnalytics, setDetailedAnalytics] = useState<any[]>([]);
   const [form, setForm] = useState({
     title: '',
+    description: '',
     slug: '',
     price: '1.99',
     preview_duration_seconds: '10',
@@ -94,6 +108,8 @@ export default function AdminDashboard() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'videos' | 'transactions'>('videos');
+  const [transactions, setTransactions] = useState<PaymentRecord[]>([]);
 
   // Background upload state
   const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
@@ -169,30 +185,50 @@ export default function AdminDashboard() {
         const chunkName = `chunk_${String(i).padStart(4, '0')}`;
         const storagePath = `${chunkPrefix}${chunkName}`;
 
-        // Get signed upload URL for this chunk
-        const signRes = await fetch(
-          `https://${projectId}.supabase.co/functions/v1/admin-upload`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adminToken, bucket: 'videos', storagePath, contentType: file.type || 'video/mp4' }),
-            signal: abortController.signal,
-          }
-        );
-        const signData = await signRes.json();
-        if (signData.error) throw new Error(signData.error);
+        // Retry logic: up to 3 attempts per chunk
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (abortController.signal.aborted) throw new Error('Upload aborted');
 
-        // Upload the chunk directly to the signed URL
-        const uploadRes = await fetch(signData.signedUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': file.type || 'video/mp4' },
-          body: chunkBlob,
-          signal: abortController.signal,
-        });
-        if (!uploadRes.ok) {
-          const errText = await uploadRes.text().catch(() => uploadRes.statusText);
-          throw new Error(`Chunk ${i + 1}/${totalChunks} upload failed: ${errText}`);
+            // Get signed upload URL for this chunk
+            const signRes = await fetch(
+              `https://${projectId}.supabase.co/functions/v1/admin-upload`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminToken, bucket: 'videos', storagePath, contentType: file.type || 'video/mp4' }),
+                signal: abortController.signal,
+              }
+            );
+            const signData = await signRes.json();
+            if (signData.error) throw new Error(signData.error);
+
+            // Upload the chunk directly to the signed URL
+            const uploadRes = await fetch(signData.signedUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': file.type || 'video/mp4' },
+              body: chunkBlob,
+              signal: abortController.signal,
+            });
+            if (!uploadRes.ok) {
+              const errText = await uploadRes.text().catch(() => uploadRes.statusText);
+              throw new Error(`Chunk ${i + 1}/${totalChunks} upload failed: ${errText}`);
+            }
+
+            lastError = null;
+            break; // Success — exit retry loop
+          } catch (err: any) {
+            lastError = err;
+            if (err.message === 'Upload aborted' || abortController.signal.aborted) throw err;
+            if (attempt < 2) {
+              // Wait before retry (exponential backoff: 2s, 4s)
+              toast({ title: 'Retrying...', description: `Chunk ${i + 1} failed, attempt ${attempt + 2}/3` });
+              await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+            }
+          }
         }
+        if (lastError) throw lastError;
 
         // Update progress
         const pct = Math.round(((i + 1) / totalChunks) * 100);
@@ -303,6 +339,7 @@ export default function AdminDashboard() {
             adminToken: sessionStorage.getItem('ppv_admin'),
             video: {
               title: form.title,
+              description: form.description || null,
               slug: form.slug,
               price: parseFloat(form.price),
               preview_duration_seconds: parseInt(form.preview_duration_seconds),
@@ -405,6 +442,7 @@ export default function AdminDashboard() {
   const editVideo = (v: VideoRecord) => {
     setForm({
       title: v.title,
+      description: v.description || '',
       slug: v.slug,
       price: v.price.toString(),
       preview_duration_seconds: v.preview_duration_seconds.toString(),
@@ -419,7 +457,7 @@ export default function AdminDashboard() {
   };
 
   const resetForm = () => {
-    setForm({ title: '', slug: '', price: '1.99', preview_duration_seconds: '10', duration_minutes: '', is_published: false });
+    setForm({ title: '', description: '', slug: '', price: '1.99', preview_duration_seconds: '10', duration_minutes: '', is_published: false });
     setEditingId(null);
     setVideoFile(null);
     setThumbnailFile(null);
@@ -427,6 +465,24 @@ export default function AdminDashboard() {
     setVideoUploadProgress(0);
     setUploadedVideoPath(null);
     setShowForm(false);
+  };
+
+  const fetchTransactions = async () => {
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    try {
+      const res = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/admin-videos`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'transactions', adminToken: sessionStorage.getItem('ppv_admin') }),
+        }
+      );
+      const data = await res.json();
+      if (data.transactions) setTransactions(data.transactions);
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load transactions.', variant: 'destructive' });
+    }
   };
 
   const logout = () => {
@@ -453,9 +509,28 @@ export default function AdminDashboard() {
             </Button>
           </div>
         </div>
+        {/* Tabs */}
+        <div className="max-w-6xl mx-auto px-4 flex gap-1">
+          <button
+            onClick={() => setActiveTab('videos')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'videos' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Video className="w-4 h-4 inline mr-1.5" />Videos
+          </button>
+          <button
+            onClick={() => { setActiveTab('transactions'); fetchTransactions(); }}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'transactions' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Receipt className="w-4 h-4 inline mr-1.5" />Transactions
+          </button>
+        </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-6">
+      <main className={`max-w-6xl mx-auto px-4 py-6 ${activeTab !== 'videos' ? 'hidden' : ''}`}>
         {/* Video Form */}
         {showForm && (
           <Card className="mb-6">
@@ -474,8 +549,22 @@ export default function AdminDashboard() {
                   <Input value={form.title} onChange={(e) => handleTitleChange(e.target.value)} />
                 </div>
                 <div>
-                  <Label>Slug (auto-generated)</Label>
-                  <Input value={form.slug} readOnly className="bg-muted text-muted-foreground cursor-not-allowed" />
+                  <Label>Slug {editingId ? '' : '(auto-generated)'}</Label>
+                  <Input
+                    value={form.slug}
+                    onChange={(e) => setForm({ ...form, slug: e.target.value })}
+                    readOnly={!editingId}
+                    className={!editingId ? 'bg-muted text-muted-foreground cursor-not-allowed' : ''}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Label>Description</Label>
+                  <textarea
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px] resize-y"
+                    placeholder="Brief description of the video content..."
+                  />
                 </div>
                 <div>
                   <Label>Price ($)</Label>
@@ -634,6 +723,69 @@ export default function AdminDashboard() {
           </Card>
         )}
       </main>
+
+      {/* Transactions Tab */}
+      {activeTab === 'transactions' && (
+        <main className="max-w-6xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold font-heading">Transaction History</h2>
+            <Button size="sm" variant="outline" onClick={fetchTransactions}>
+              <RefreshCw className="w-4 h-4" /> Refresh
+            </Button>
+          </div>
+          {transactions.length === 0 ? (
+            <Card className="p-8 text-center text-muted-foreground">
+              No transactions yet.
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {/* Summary */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                <Card className="p-3 text-center">
+                  <div className="text-2xl font-bold text-foreground">{transactions.length}</div>
+                  <div className="text-xs text-muted-foreground">Total Transactions</div>
+                </Card>
+                <Card className="p-3 text-center">
+                  <div className="text-2xl font-bold text-success">
+                    ${transactions.filter(t => t.status === 'completed').reduce((sum, t) => sum + Number(t.amount), 0).toFixed(2)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Total Revenue</div>
+                </Card>
+                <Card className="p-3 text-center">
+                  <div className="text-2xl font-bold text-foreground">
+                    {transactions.filter(t => t.status === 'completed').length}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Completed</div>
+                </Card>
+              </div>
+              {/* Transaction list */}
+              {transactions.map(t => (
+                <Card key={t.id} className="p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-foreground truncate">{t.video_title || t.video_id}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {t.payer_email || 'Guest'} · {new Date(t.created_at).toLocaleDateString()} {new Date(t.created_at).toLocaleTimeString()}
+                      </p>
+                      {t.paypal_order_id && (
+                        <p className="text-xs text-muted-foreground">PayPal: {t.paypal_order_id}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="font-bold text-foreground">${Number(t.amount).toFixed(2)}</div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        t.status === 'completed' ? 'bg-success/10 text-success' : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {t.status}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </main>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>

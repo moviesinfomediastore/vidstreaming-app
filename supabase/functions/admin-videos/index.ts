@@ -128,6 +128,41 @@ serve(async (req) => {
       });
     }
 
+    if (action === 'transactions') {
+      // Fetch all payments with video titles
+      const { data: payments } = await supabase
+        .from('payments')
+        .select('id, video_id, paypal_order_id, amount, status, payer_email, session_token, created_at')
+        .order('created_at', { ascending: false });
+
+      if (!payments) {
+        return new Response(JSON.stringify({ transactions: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get video titles for each unique video_id
+      const videoIds = [...new Set(payments.map(p => p.video_id))];
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('id, title')
+        .in('id', videoIds);
+
+      const titleMap: Record<string, string> = {};
+      if (videos) {
+        for (const v of videos) titleMap[v.id] = v.title;
+      }
+
+      const transactions = payments.map(p => ({
+        ...p,
+        video_title: titleMap[p.video_id] || 'Unknown Video',
+      }));
+
+      return new Response(JSON.stringify({ transactions }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response(JSON.stringify({ error: 'Unknown action' }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
