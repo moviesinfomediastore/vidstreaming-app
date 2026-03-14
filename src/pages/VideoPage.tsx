@@ -41,7 +41,7 @@ export default function VideoPage() {
 
   // Handle PayPal return callback
   useEffect(() => {
-    const token = searchParams.get('token'); // PayPal order ID
+    const token = searchParams.get('token');
     const cancelled = searchParams.get('cancelled');
 
     if (cancelled) {
@@ -50,13 +50,11 @@ export default function VideoPage() {
         description: 'You cancelled the payment. You can try again anytime.',
         variant: 'destructive',
       });
-      // Clean URL
       window.history.replaceState({}, '', `/video/${slug}`);
       return;
     }
 
     if (token && slug) {
-      // Capture payment from PayPal return
       handlePayPalCapture(token);
     }
   }, [searchParams, slug]);
@@ -64,7 +62,6 @@ export default function VideoPage() {
   const handlePayPalCapture = async (orderId: string) => {
     setIsProcessing(true);
     try {
-      // We need the video data first
       const { data: videoData } = await supabase
         .from('videos')
         .select('*')
@@ -100,7 +97,6 @@ export default function VideoPage() {
           description: 'Your video is now unlocked. Enjoy!',
         });
 
-        // Get full video URL
         const fullUrl = await getSignedUrl(videoData.video_path || '', true, videoData.id, result.sessionToken);
         if (fullUrl) setVideoUrl(fullUrl);
 
@@ -120,7 +116,6 @@ export default function VideoPage() {
       });
     } finally {
       setIsProcessing(false);
-      // Clean URL
       window.history.replaceState({}, '', `/video/${slug}`);
     }
   };
@@ -128,7 +123,6 @@ export default function VideoPage() {
   // Fetch video data
   useEffect(() => {
     if (!slug) return;
-    // Don't re-fetch if we're handling a PayPal callback (token present)
     const token = searchParams.get('token');
     if (token) return;
 
@@ -224,7 +218,6 @@ export default function VideoPage() {
       );
       const result = await response.json();
       if (result.url) {
-        // Auto-refresh preview URLs before they expire (60s expiry, refresh at 45s)
         if (!fullAccess && result.expiresIn) {
           const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
           setTimeout(async () => {
@@ -236,7 +229,6 @@ export default function VideoPage() {
       }
       return null;
     } catch {
-      // Do NOT fall back to client-side signed URLs — that bypasses payment validation
       console.error('Failed to get video access URL');
       return null;
     }
@@ -260,11 +252,9 @@ export default function VideoPage() {
       const orderData = await createRes.json();
 
       if (orderData.approvalUrl) {
-        // Redirect to PayPal (standard redirect flow)
         window.location.href = orderData.approvalUrl;
-        return; // Don't setIsProcessing(false) since we're navigating away
+        return;
       } else if (orderData.demo) {
-        // Demo mode: simulate successful payment
         const sessionToken = crypto.randomUUID();
         setSessionToken(video.id, sessionToken);
         setIsUnlocked(true);
@@ -320,7 +310,7 @@ export default function VideoPage() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <main className="flex-1 w-full">
-        {/* Video Section - full width on mobile, constrained on desktop */}
+        {/* Video player — edge-to-edge on mobile */}
         <div className="w-full max-w-5xl mx-auto">
           <div className="sm:px-4 lg:px-6 sm:pt-4 lg:pt-6">
             {videoUrl && (
@@ -331,7 +321,6 @@ export default function VideoPage() {
                 videoId={video.id}
                 onPreviewEnd={() => setShowPaywall(true)}
               >
-                {/* Paywall rendered inside VideoPlayer wrapper for fullscreen support */}
                 {showPaywall && !isUnlocked && (
                   <PaywallOverlay
                     videoTitle={video.title}
@@ -346,72 +335,75 @@ export default function VideoPage() {
           </div>
         </div>
 
-        {/* Video Info Section */}
-        <div className="max-w-5xl mx-auto w-full px-4 lg:px-6 py-4 sm:py-6">
-          {/* Payment success banner */}
+        {/* Content section */}
+        <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 py-4 sm:py-6 space-y-4">
+          {/* Success banner */}
           {paymentSuccess && (
-            <div className="mb-4 bg-success/10 border border-success/30 rounded-xl p-4 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+            <div className="bg-success/10 border border-success/20 rounded-xl p-3.5 flex items-center gap-3 animate-fade-in-up">
               <CheckCircle className="w-5 h-5 text-success shrink-0" />
               <p className="text-sm font-medium text-foreground">
-                Payment successful! Your video is now unlocked — enjoy watching.
+                Payment successful! Your video is now unlocked — enjoy.
               </p>
             </div>
           )}
 
-          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-foreground font-heading leading-tight">
+          {/* Title */}
+          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-foreground font-heading leading-snug">
             {video.title}
           </h1>
 
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4 mt-2 sm:mt-3 text-sm text-muted-foreground">
+          {/* Metadata badges */}
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             {viewCount > 0 && (
-              <span className="flex items-center gap-1.5">
-                <Eye className="w-4 h-4" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.06] text-muted-foreground">
+                <Eye className="w-3.5 h-3.5" />
                 {viewCount.toLocaleString()} {viewCount === 1 ? 'view' : 'views'}
               </span>
             )}
             {purchaseCount > 0 && (
-              <span className="flex items-center gap-1.5 text-success">
-                <Users className="w-4 h-4" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success/10 border border-success/20 text-success">
+                <Users className="w-3.5 h-3.5" />
                 {purchaseCount.toLocaleString()} {purchaseCount === 1 ? 'purchase' : 'purchases'}
               </span>
             )}
             {video.duration_minutes && (
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.04] border border-white/[0.06] text-muted-foreground">
+                <Clock className="w-3.5 h-3.5" />
                 {video.duration_minutes} min
               </span>
             )}
             {!isUnlocked && (
-              <span className="flex items-center gap-1.5 text-accent font-semibold">
-                <DollarSign className="w-4 h-4" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/10 border border-accent/20 text-accent font-semibold">
+                <DollarSign className="w-3.5 h-3.5" />
                 ${video.price.toFixed(2)}
               </span>
             )}
             {isUnlocked && (
-              <span className="flex items-center gap-1.5 text-success font-medium">
-                <CheckCircle className="w-4 h-4" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success/10 border border-success/20 text-success font-medium">
+                <CheckCircle className="w-3.5 h-3.5" />
                 Unlocked
               </span>
             )}
           </div>
 
+          {/* Description */}
           {video.description && (
-            <p className="text-sm text-muted-foreground leading-relaxed mt-3 sm:mt-4 max-w-3xl">
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-3xl">
               {video.description}
             </p>
           )}
 
-          {/* CTA for users who haven't paid and paywall isn't showing */}
+          {/* CTA card for non-paying users */}
           {!isUnlocked && !showPaywall && (
-            <div className="bg-card border border-border rounded-xl p-4 sm:p-5 mt-4 sm:mt-6 max-w-md">
+            <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 sm:p-5 max-w-md">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
-                  <Play className="w-5 h-5 text-accent" />
+                <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'var(--gradient-accent)' }}>
+                  <Play className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground">Watch the preview</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Preview plays automatically. Unlock full video for ${video.price.toFixed(2)}.
+                    Preview plays automatically. Unlock the full video for ${video.price.toFixed(2)}.
                   </p>
                 </div>
               </div>
