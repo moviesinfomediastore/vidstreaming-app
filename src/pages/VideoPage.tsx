@@ -29,6 +29,7 @@ export default function VideoPage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [loading, setLoading] = useState(true);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isHls, setIsHls] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -96,8 +97,11 @@ export default function VideoPage() {
         });
 
         // Get full video URL
-        const fullUrl = await getSignedUrl(videoData.video_path || '', true, videoData.id, result.sessionToken);
-        if (fullUrl) setVideoUrl(fullUrl);
+        const fullAccess = await getSignedUrl(videoData.video_path || '', true, videoData.id, result.sessionToken);
+        if (fullAccess) {
+          setVideoUrl(fullAccess.url);
+          setIsHls(fullAccess.isHls);
+        }
 
         setTimeout(() => setPaymentSuccess(false), 5000);
       } else {
@@ -146,17 +150,24 @@ export default function VideoPage() {
       // Check existing session
       const sessionToken = getSessionToken(data.id);
       if (sessionToken) {
-        const fullUrl = await getSignedUrl(data.video_path || '', true, data.id, sessionToken);
-        if (fullUrl) {
-          setVideoUrl(fullUrl);
+        const fullAccess = await getSignedUrl(data.video_path || '', true, data.id, sessionToken);
+        if (fullAccess) {
+          setVideoUrl(fullAccess.url);
+          setIsHls(fullAccess.isHls);
           setIsUnlocked(true);
         } else {
-          const previewUrl = await getSignedUrl(data.video_path || '', false, data.id);
-          setVideoUrl(previewUrl);
+          const preview = await getSignedUrl(data.video_path || '', false, data.id);
+          if (preview) {
+             setVideoUrl(preview.url);
+             setIsHls(preview.isHls);
+          }
         }
       } else {
-        const previewUrl = await getSignedUrl(data.video_path || '', false, data.id);
-        setVideoUrl(previewUrl);
+        const preview = await getSignedUrl(data.video_path || '', false, data.id);
+        if (preview) {
+           setVideoUrl(preview.url);
+           setIsHls(preview.isHls);
+        }
       }
       setLoading(false);
     };
@@ -178,15 +189,18 @@ export default function VideoPage() {
 
       if (data) {
         setVideo(data);
-        const previewUrl = await getSignedUrl(data.video_path || '', false, data.id);
-        setVideoUrl(previewUrl);
+        const preview = await getSignedUrl(data.video_path || '', false, data.id);
+        if (preview) {
+           setVideoUrl(preview.url);
+           setIsHls(preview.isHls);
+        }
         setLoading(false);
       }
     };
     fetchVideoForCallback();
   }, [slug, searchParams]);
 
-  const getSignedUrl = async (_path: string, fullAccess: boolean, videoId: string, sessionToken?: string): Promise<string | null> => {
+  const getSignedUrl = async (_path: string, fullAccess: boolean, videoId: string, sessionToken?: string): Promise<{ url: string, isHls: boolean } | null> => {
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
       const response = await fetch(
@@ -198,16 +212,37 @@ export default function VideoPage() {
         }
       );
       const result = await response.json();
+      
+      if (result.playlistText) {
+        const blob = new Blob([result.playlistText], { type: 'application/vnd.apple.mpegurl' });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        if (!fullAccess && result.expiresIn) {
+          const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
+          setTimeout(async () => {
+            const fresh = await getSignedUrl(_path, false, videoId);
+            if (fresh) {
+              setVideoUrl(fresh.url);
+              setIsHls(fresh.isHls);
+            }
+          }, refreshMs);
+        }
+        return { url: blobUrl, isHls: true };
+      }
+
       if (result.url) {
         // Auto-refresh preview URLs before they expire (60s expiry, refresh at 45s)
         if (!fullAccess && result.expiresIn) {
           const refreshMs = Math.max((result.expiresIn - 15) * 1000, 10000);
           setTimeout(async () => {
-            const freshUrl = await getSignedUrl(_path, false, videoId);
-            if (freshUrl) setVideoUrl(freshUrl);
+            const fresh = await getSignedUrl(_path, false, videoId);
+            if (fresh) {
+               setVideoUrl(fresh.url);
+               setIsHls(fresh.isHls);
+            }
           }, refreshMs);
         }
-        return result.url;
+        return { url: result.url, isHls: false };
       }
       return null;
     } catch {
@@ -252,8 +287,11 @@ export default function VideoPage() {
           description: 'PayPal is not configured. Video unlocked in demo mode.',
         });
 
-        const fullUrl = await getSignedUrl(video.video_path || '', true, video.id, sessionToken);
-        if (fullUrl) setVideoUrl(fullUrl);
+        const fullAccess = await getSignedUrl(video.video_path || '', true, video.id, sessionToken);
+        if (fullAccess) {
+           setVideoUrl(fullAccess.url);
+           setIsHls(fullAccess.isHls);
+        }
 
         setTimeout(() => setPaymentSuccess(false), 5000);
       } else {
@@ -301,6 +339,7 @@ export default function VideoPage() {
             {videoUrl && (
               <VideoPlayer
                 videoUrl={videoUrl}
+                isHls={isHls}
                 previewDuration={video.preview_duration_seconds}
                 isUnlocked={isUnlocked}
                 videoId={video.id}

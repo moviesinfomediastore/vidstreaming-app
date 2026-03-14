@@ -12,7 +12,8 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/hooks/use-toast';
-import * as tus from 'tus-js-client';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import {
   Plus, Trash2, Edit2, BarChart3, Video, Eye, Play,
   DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link
@@ -98,7 +99,7 @@ export default function AdminDashboard() {
 
   // Background upload state
   const [videoUploadProgress, setVideoUploadProgress] = useState<number>(0);
-  const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [videoUploadStatus, setVideoUploadStatus] = useState<'idle' | 'processing' | 'uploading' | 'done' | 'error'>('idle');
   const [uploadedVideoPath, setUploadedVideoPath] = useState<string | null>(null);
   const uploadAbortRef = useRef<AbortController | null>(null);
 
@@ -143,73 +144,114 @@ export default function AdminDashboard() {
   };
 
   const startBackgroundUpload = async (file: File) => {
-    setVideoUploadStatus('uploading');
+    setVideoUploadStatus('processing');
     setVideoUploadProgress(0);
     setUploadedVideoPath(null);
 
     const slug = form.slug || 'video-' + Date.now();
-    const ext = file.name.split('.').pop();
-    const storagePath = `${slug}-${Date.now()}.${ext}`;
+    const folderPath = `${slug}-${Date.now()}`;
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const adminToken = sessionStorage.getItem('ppv_admin');
 
     try {
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-      const adminToken = sessionStorage.getItem('ppv_admin');
+      // Step 1: Initialize FFmpeg and segment video into HLS
+      const ffmpeg = new FFmpeg();
+      
+      ffmpeg.on('progress', ({ progress }) => {
+        setVideoUploadProgress(Math.round(progress * 100));
+      });
 
-      // Step 1: Get a signed upload URL from edge function
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+
+      await ffmpeg.writeFile('input.mp4', await fetchFile(file));
+
+      // Execute HLS segmentation (extremely fast because -codec copy)
+      await ffmpeg.exec([
+        '-i', 'input.mp4',
+        '-codec', 'copy',
+        '-hls_time', '5',
+        '-hls_list_size', '0',
+        '-hls_segment_filename', 'chunk_%03d.ts',
+        '-f', 'hls',
+        'index.m3u8'
+      ]);
+
+      // Step 2: Read output files
+      setVideoUploadStatus('uploading');
+      setVideoUploadProgress(0);
+      
+      const m3u8Data = await ffmpeg.readFile('index.m3u8');
+      const m3u8Text = new TextDecoder().decode(m3u8Data as Uint8Array);
+      const tsFiles = m3u8Text.split('\n').filter(line => line.trim().endsWith('.ts'));
+
+      const filesToUpload: { name: string, data: Uint8Array, type: string, path: string }[] = [];
+      
+      filesToUpload.push({
+        name: 'index.m3u8',
+        data: m3u8Data as Uint8Array,
+        type: 'application/x-mpegURL',
+        path: `${folderPath}/index.m3u8`
+      });
+
+      for (const tsFile of tsFiles) {
+        filesToUpload.push({
+          name: tsFile.trim(),
+          data: await ffmpeg.readFile(tsFile.trim()) as Uint8Array,
+          type: 'video/mp2t',
+          path: `${folderPath}/${tsFile.trim()}`
+        });
+      }
+
+      // Step 3: Get signed URLs for all chunks at once
+      const storagePaths = filesToUpload.map(f => f.path);
       const signRes = await fetch(
         `https://${projectId}.supabase.co/functions/v1/admin-upload`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ adminToken, bucket: 'videos', storagePath, contentType: file.type }),
+          body: JSON.stringify({ adminToken, bucket: 'videos', storagePaths }),
         }
       );
       const signData = await signRes.json();
       if (signData.error) throw new Error(signData.error);
 
-      // Step 2: Upload using TUS resumable protocol to bypass 50MB Cloudflare payload limits
-      // We pass the signed URL token via Authorization header
-      await new Promise<void>((resolve, reject) => {
-        const upload = new tus.Upload(file, {
-          endpoint: `https://${projectId}.supabase.co/storage/v1/upload/resumable`,
-          retryDelays: [0, 3000, 5000, 10000, 20000],
-          headers: {
-            authorization: `Bearer ${signData.token}`,
-            'x-upsert': 'true',
-          },
-          uploadDataDuringCreation: true,
-          metadata: {
-            bucketName: 'videos',
-            objectName: storagePath,
-            contentType: file.type || 'video/mp4',
-            cacheControl: '3600',
-          },
-          chunkSize: 6 * 1024 * 1024, // 6MB chunks
-          onError: (error) => {
-            console.error('TUS upload error:', error);
-            reject(new Error('Upload failed: ' + error.message));
-          },
-          onProgress: (bytesUploaded, bytesTotal) => {
-            if (bytesTotal) {
-              const pct = Math.round((bytesUploaded / bytesTotal) * 100);
-              setVideoUploadProgress(pct);
-            }
-          },
-          onSuccess: () => {
-            resolve();
-          },
-        });
+      // Step 4: Upload all chunks in parallel (with concurrency limit)
+      let uploadedCount = 0;
+      const MAX_CONCURRENT = 5;
+      
+      for (let i = 0; i < signData.urls.length; i += MAX_CONCURRENT) {
+        const batch = signData.urls.slice(i, i + MAX_CONCURRENT);
+        await Promise.all(
+          batch.map(async (urlObj: any) => {
+            if (urlObj.error) throw new Error(`Signed URL error: ${urlObj.error}`);
+            const fileObj = filesToUpload.find(f => f.path === urlObj.path);
+            if (!fileObj) return;
 
-        // Save abort controller functionality
-        uploadAbortRef.current = { abort: () => upload.abort() } as any;
+            const uploadRes = await fetch(urlObj.signedUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': fileObj.type },
+              body: fileObj.data as any,
+            });
 
-        // Start upload
-        upload.start();
-      });
+            if (!uploadRes.ok) throw new Error(`Failed to upload ${fileObj.name}`);
+            
+            uploadedCount++;
+            setVideoUploadProgress(Math.round((uploadedCount / filesToUpload.length) * 100));
+          })
+        );
+      }
+
+      // Clean up ffmpeg memory
+      ffmpeg.terminate();
 
       setVideoUploadStatus('done');
-      setUploadedVideoPath(storagePath);
-      toast({ title: 'Video uploaded', description: 'Video file uploaded successfully.' });
+      // Store the master m3u8 path as the primary video path
+      setUploadedVideoPath(`${folderPath}/index.m3u8`);
+      toast({ title: 'Upload complete', description: 'HLS video chunks uploaded successfully.' });
     } catch (err: any) {
       if (err.message === 'Upload aborted') return;
       setVideoUploadStatus('error');
@@ -502,6 +544,15 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Upload className="w-4 h-4 animate-pulse text-primary" />
                         <span>Uploading... {videoUploadProgress}%</span>
+                      </div>
+                      <Progress value={videoUploadProgress} className="h-2" />
+                    </div>
+                  )}
+                  {videoUploadStatus === 'processing' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Video className="w-4 h-4 animate-pulse text-primary" />
+                        <span>Segmenting Video (HLS)... {videoUploadProgress}%</span>
                       </div>
                       <Progress value={videoUploadProgress} className="h-2" />
                     </div>
