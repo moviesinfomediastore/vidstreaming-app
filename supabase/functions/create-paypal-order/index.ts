@@ -85,6 +85,15 @@ serve(async (req) => {
         return_url: `${origin}/video/${videoSlug}`,
         cancel_url: `${origin}/video/${videoSlug}?cancelled=true`,
         user_action: 'PAY_NOW',
+        shipping_preference: 'NO_SHIPPING',
+      },
+      payment_source: {
+        paypal: {
+          experience_context: {
+            payment_method_preference: 'IMMEDIATE_PAYMENT_REQUIRED',
+            landing_page: 'LOGIN',
+          },
+        },
       },
     };
     console.log('Creating PayPal order with currency:', PAYPAL_CURRENCY, 'amount:', video.price.toFixed(2));
