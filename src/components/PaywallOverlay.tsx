@@ -33,7 +33,7 @@ export default function PaywallOverlay({
 
   if (!showPaywall) {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black/85 backdrop-blur-md z-20">
+      <div className="fixed inset-0 flex items-center justify-center bg-black/85 backdrop-blur-md z-50">
         <div className="text-center animate-fade-in-up">
           <div className="w-20 h-20 rounded-full border-[3px] border-primary/80 flex items-center justify-center mx-auto mb-4 animate-pulse-glow">
             <span className="text-4xl font-bold text-primary font-heading">{countdown}</span>
@@ -45,9 +45,9 @@ export default function PaywallOverlay({
   }
 
   return (
-    <div className="absolute inset-0 flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-md z-20 p-0 sm:p-4">
+    <div className="fixed inset-0 flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-md z-50 p-0 sm:p-4">
       <div
-        className={`glass border border-white/[0.08] w-full sm:max-w-[400px] sm:rounded-2xl rounded-t-2xl p-5 sm:p-7 shadow-2xl transition-all duration-500 ${
+        className={`glass border border-white/[0.08] w-full sm:max-w-[400px] sm:rounded-2xl rounded-t-2xl p-5 sm:p-7 shadow-2xl transition-all duration-500 max-h-[85vh] overflow-y-auto ${
           isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
         }`}
       >
