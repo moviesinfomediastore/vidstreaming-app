@@ -107,13 +107,15 @@ export default function VideoPage() {
           description: result.error || 'Payment could not be completed.',
           variant: 'destructive',
         });
+        trackEvent(videoData.id, 'payment_error', 0, { error_message: result.error || 'Capture failed' });
       }
-    } catch {
+    } catch (err) {
       toast({
         title: 'Payment Error',
         description: 'Something went wrong processing your payment.',
         variant: 'destructive',
       });
+      trackEvent(slug!, 'payment_error', 0, { error_message: String(err) });
     } finally {
       setIsProcessing(false);
       window.history.replaceState({}, '', `/video/${slug}`);
@@ -141,6 +143,22 @@ export default function VideoPage() {
 
       setVideo(data as unknown as Video);
       trackEvent(data.id, 'page_visit');
+
+      // Setup page_leave tracking
+      const mountTime = Date.now();
+      const pageLeaveHandler = () => {
+        const timeSpent = Math.floor((Date.now() - mountTime) / 1000);
+        trackEvent(data.id, 'page_leave', timeSpent);
+      };
+      // Track on both page unload and component unmount
+      window.addEventListener('beforeunload', pageLeaveHandler);
+      
+      // Cleanup
+      const originalUnmount = window.onunload;
+      window.onunload = (e) => {
+        pageLeaveHandler();
+        if (originalUnmount) originalUnmount.call(window, e);
+      };
 
       // Fetch social proof counts
       const { data: events } = await supabase
@@ -255,6 +273,7 @@ export default function VideoPage() {
   const handlePaymentRequest = async () => {
     if (!video) return;
     setIsProcessing(true);
+    trackEvent(video.id, 'payment_initiated');
 
     try {
       const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
@@ -295,13 +314,15 @@ export default function VideoPage() {
           description: orderData.error || 'Could not create payment.',
           variant: 'destructive',
         });
+        trackEvent(video.id, 'payment_error', 0, { error_message: orderData.error || 'Create order failed' });
       }
-    } catch {
+    } catch (err) {
       toast({
         title: 'Payment Error',
         description: 'Something went wrong. Please try again.',
         variant: 'destructive',
       });
+      trackEvent(video?.id || slug!, 'payment_error', 0, { error_message: String(err) });
     } finally {
       setIsProcessing(false);
     }

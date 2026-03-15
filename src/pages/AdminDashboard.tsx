@@ -95,7 +95,7 @@ export default function AdminDashboard() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedAnalytics, setSelectedAnalytics] = useState<string | null>(null);
-  const [detailedAnalytics, setDetailedAnalytics] = useState<any[]>([]);
+  const [detailedAnalytics, setDetailedAnalytics] = useState<any | null>(null);
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -284,9 +284,9 @@ export default function AdminDashboard() {
         }
       );
       const data = await res.json();
-      if (data.analytics) setDetailedAnalytics(data.analytics);
+      if (data.daily) setDetailedAnalytics(data);
     } catch {
-      setDetailedAnalytics([]);
+      setDetailedAnalytics(null);
     }
     setSelectedAnalytics(videoId);
   };
@@ -681,17 +681,17 @@ export default function AdminDashboard() {
         </div>
 
         {/* Analytics Detail */}
-        {selectedAnalytics && (
+        {selectedAnalytics && detailedAnalytics && (
           <Card className="mt-6 bg-card border-border">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="font-heading text-base">Analytics</CardTitle>
+              <CardTitle className="font-heading text-base">Advanced Analytics</CardTitle>
               <Button size="icon" variant="ghost" onClick={() => setSelectedAnalytics(null)}>
                 <X className="w-4 h-4" />
               </Button>
             </CardHeader>
             <CardContent>
               {summary && (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
                   {[
                     { label: 'Visitors', value: summary.page_visits, icon: Eye },
                     { label: 'Play Starts', value: summary.play_starts, icon: Play },
@@ -707,17 +707,124 @@ export default function AdminDashboard() {
                   ))}
                 </div>
               )}
-              {detailedAnalytics.length > 0 && (
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={detailedAnalytics}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" />
-                    <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} />
-                    <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} />
-                    <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px', color: 'hsl(0 0% 98%)' }} />
-                    <Bar dataKey="visits" fill="hsl(250, 65%, 55%)" />
-                    <Bar dataKey="payments" fill="hsl(35, 95%, 55%)" />
-                  </BarChart>
-                </ResponsiveContainer>
+
+              {/* Advanced Funnel UI */}
+              <div className="mb-8 space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Conversion Funnel</h3>
+                <div className="bg-muted/30 border border-border rounded-xl p-6">
+                  <div className="space-y-5">
+                    {[
+                      { label: 'Page Visits', value: detailedAnalytics.funnel.visits, max: detailedAnalytics.funnel.visits },
+                      { label: 'Video Started', value: detailedAnalytics.funnel.starts, max: detailedAnalytics.funnel.visits },
+                      { label: 'Paywall Reached', value: detailedAnalytics.funnel.paywalls, max: detailedAnalytics.funnel.visits },
+                      { label: 'Payment Initiated', value: detailedAnalytics.funnel.payment_clicks, max: detailedAnalytics.funnel.visits },
+                      { label: 'Payment Successful', value: detailedAnalytics.funnel.successes, max: detailedAnalytics.funnel.visits }
+                    ].map((step, i, arr) => {
+                      const pct = step.max > 0 ? (step.value / step.max) * 100 : 0;
+                      const dropoff = i > 0 && arr[i-1].value > 0 ? ((arr[i-1].value - step.value) / arr[i-1].value) * 100 : 0;
+                      return (
+                        <div key={step.label} className="relative">
+                          <div className="flex justify-between text-sm mb-1.5">
+                            <span className="font-medium text-foreground">{step.label}</span>
+                            <span>{step.value} <span className="text-muted-foreground text-xs ml-1">({pct.toFixed(1)}%)</span></span>
+                          </div>
+                          <div className="w-full bg-background/50 rounded-full h-4 border border-border/50">
+                            <div className="bg-primary h-full rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                          </div>
+                          {dropoff > 0 && (
+                            <div className="text-[10px] text-destructive mt-1 text-right font-medium">
+                              -{dropoff.toFixed(1)}% drop-off from previous step
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Engagement UI */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Time on Page</h3>
+                  <div className="bg-muted/30 border border-border rounded-xl p-6 text-center h-[120px] flex flex-col justify-center">
+                    <div className="text-4xl font-bold text-foreground mb-1">
+                      {Math.floor(detailedAnalytics.engagement.avg_time_on_page / 60)}m {detailedAnalytics.engagement.avg_time_on_page % 60}s
+                    </div>
+                    <div className="text-xs text-muted-foreground">Average wait before leaving</div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Preview Drop-off</h3>
+                  <div className="bg-muted/30 border border-border rounded-xl p-4 flex items-center justify-around h-[120px]">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-foreground">{detailedAnalytics.engagement.progress['25']}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase mt-1">25% mark</div>
+                    </div>
+                    <div className="text-center border-l border-border pl-6">
+                      <div className="text-2xl font-bold text-foreground">{detailedAnalytics.engagement.progress['50']}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase mt-1">50% mark</div>
+                    </div>
+                    <div className="text-center border-l border-border pl-6">
+                      <div className="text-2xl font-bold text-foreground">{detailedAnalytics.engagement.progress['75']}</div>
+                      <div className="text-[10px] text-muted-foreground uppercase mt-1">75% mark</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Error Diagnostic Logs */}
+              {detailedAnalytics.errors.length > 0 && (
+                <div className="mb-8">
+                  <h3 className="text-sm font-semibold text-destructive uppercase tracking-wider mb-2">Payment Diagnostic Logs</h3>
+                  <div className="bg-muted/30 border border-destructive/30 rounded-xl overflow-hidden text-sm">
+                    <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-left">
+                        <thead className="bg-destructive/10 text-destructive text-xs uppercase sticky top-0 backdrop-blur-md">
+                          <tr>
+                            <th className="px-4 py-3 font-medium">Time (Local)</th>
+                            <th className="px-4 py-3 font-medium">Session ID</th>
+                            <th className="px-4 py-3 font-medium">Error Message</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50">
+                          {detailedAnalytics.errors.map((err: any) => (
+                            <tr key={err.id} className="hover:bg-muted/50 transition-colors">
+                              <td className="px-4 py-3 whitespace-nowrap text-muted-foreground text-xs">
+                                {new Date(err.created_at).toLocaleString()}
+                              </td>
+                              <td className="px-4 py-3 font-mono text-[10px] text-muted-foreground">
+                                {err.session_id ? err.session_id.split('-')[0] + '...' : 'Unknown'}
+                              </td>
+                              <td className="px-4 py-3 text-foreground break-words max-w-sm">
+                                <span className="inline-block bg-destructive/10 text-destructive text-xs px-2 py-1 rounded">
+                                  {err.message}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Daily Trend Chart */}
+              {detailedAnalytics.daily?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Daily Trend</h3>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={detailedAnalytics.daily}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" vertical={false} />
+                      <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
+                      <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px', color: 'hsl(0 0% 98%)' }} cursor={{ fill: 'hsl(240 3.7% 15%)' }} />
+                      <Bar dataKey="visits" fill="hsl(250, 65%, 55%)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="payments" fill="hsl(35, 95%, 55%)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               )}
             </CardContent>
           </Card>

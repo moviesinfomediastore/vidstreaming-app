@@ -28,11 +28,28 @@ export default function VideoPlayer({
   const [hasStarted, setHasStarted] = useState(false);
   const [previewEnded, setPreviewEnded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const progressMarkers = useRef(new Set<number>());
+
+  // Reset markers if video changes
+  useEffect(() => {
+    progressMarkers.current.clear();
+  }, [videoId]);
 
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     setCurrentTime(video.currentTime);
+
+    // Track detailed progress (25%, 50%, 75% of preview)
+    if (previewDuration > 0) {
+      const pct = (video.currentTime / previewDuration) * 100;
+      [25, 50, 75].forEach(marker => {
+        if (pct >= marker && !progressMarkers.current.has(marker)) {
+          progressMarkers.current.add(marker);
+          trackEvent(videoId, 'play_progress', Math.floor(video.currentTime), { percentage: marker });
+        }
+      });
+    }
 
     if (!isUnlocked && !previewEnded && video.currentTime >= previewDuration) {
       video.pause();

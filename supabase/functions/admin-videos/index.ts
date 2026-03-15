@@ -99,31 +99,80 @@ serve(async (req) => {
     }
 
     if (action === 'analytics') {
-      // Get daily breakdown for a specific video
+      // Get all advanced analytics for a specific video
       const { data: events } = await supabase
         .from('video_analytics')
-        .select('event_type, created_at')
+        .select('*')
         .eq('video_id', videoId)
         .order('created_at', { ascending: true });
 
-      if (!events) {
-        return new Response(JSON.stringify({ analytics: [] }), {
+      if (!events || events.length === 0) {
+        return new Response(JSON.stringify({ daily: [], funnel: {}, errors: [], engagement: {} }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Group by date
       const dailyMap: Record<string, { visits: number; payments: number }> = {};
+      const funnel = { visits: 0, starts: 0, paywalls: 0, payment_clicks: 0, successes: 0 };
+      const errors: any[] = [];
+      let totalTimeOnPage = 0;
+      let pageLeaveCount = 0;
+      const progress = { '25': 0, '50': 0, '75': 0 };
+
       for (const e of events) {
         const date = e.created_at.split('T')[0];
         if (!dailyMap[date]) dailyMap[date] = { visits: 0, payments: 0 };
-        if (e.event_type === 'page_visit') dailyMap[date].visits++;
-        if (e.event_type === 'payment_completed') dailyMap[date].payments++;
+
+        switch (e.event_type) {
+          case 'page_visit': 
+            dailyMap[date].visits++; 
+            funnel.visits++; 
+            break;
+          case 'payment_completed': 
+            dailyMap[date].payments++; 
+            funnel.successes++; 
+            break;
+          case 'play_start': 
+            funnel.starts++; 
+            break;
+          case 'paywall_reached': 
+            funnel.paywalls++; 
+            break;
+          case 'payment_initiated': 
+            funnel.payment_clicks++; 
+            break;
+          case 'payment_error':
+            errors.push({
+              id: e.id,
+              created_at: e.created_at,
+              session_id: e.session_id,
+              message: e.event_data?.error_message || 'Unknown error'
+            });
+            break;
+          case 'page_leave':
+            if (e.watch_duration_seconds > 0) {
+              totalTimeOnPage += e.watch_duration_seconds;
+              pageLeaveCount++;
+            }
+            break;
+          case 'play_progress':
+            if (e.event_data?.percentage === 25) progress['25']++;
+            if (e.event_data?.percentage === 50) progress['50']++;
+            if (e.event_data?.percentage === 75) progress['75']++;
+            break;
+        }
       }
 
-      const analytics = Object.entries(dailyMap).map(([date, data]) => ({ date, ...data }));
+      const daily = Object.entries(dailyMap).map(([date, data]) => ({ date, ...data }));
+      const engagement = {
+        avg_time_on_page: pageLeaveCount > 0 ? Math.round(totalTimeOnPage / pageLeaveCount) : 0,
+        progress
+      };
 
-      return new Response(JSON.stringify({ analytics }), {
+      // Sort errors newest first
+      errors.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      return new Response(JSON.stringify({ daily, funnel, errors, engagement }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
