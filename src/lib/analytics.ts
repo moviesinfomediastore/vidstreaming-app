@@ -1,5 +1,5 @@
-import { supabase } from '@/integrations/supabase/client';
 import { getVisitorId, generateUUID } from './visitor';
+import { getDeviceInfo, getTrafficSource } from './device';
 
 export type EventType = 
   | 'page_visit' 
@@ -21,6 +21,16 @@ export function getSessionId(): string {
   return sessionId;
 }
 
+// Lazily cached device + traffic info (computed once per page load)
+let _deviceInfo: ReturnType<typeof getDeviceInfo> | null = null;
+let _trafficSource: ReturnType<typeof getTrafficSource> | null = null;
+
+function getClientContext() {
+  if (!_deviceInfo) _deviceInfo = getDeviceInfo();
+  if (!_trafficSource) _trafficSource = getTrafficSource();
+  return { ..._deviceInfo, ..._trafficSource };
+}
+
 export async function trackEvent(
   videoId: string,
   eventType: EventType,
@@ -28,6 +38,7 @@ export async function trackEvent(
   eventData: Record<string, any> = {}
 ) {
   try {
+    const ctx = getClientContext();
     const payload = {
       video_id: videoId,
       event_type: eventType,
@@ -35,25 +46,36 @@ export async function trackEvent(
       visitor_id: getVisitorId(),
       session_id: getSessionId(),
       event_data: eventData,
+      // Device & browser (from client)
+      device_type: ctx.device_type,
+      browser: ctx.browser,
+      os: ctx.os,
+      screen_resolution: ctx.screen_resolution,
+      language: ctx.language,
+      // Traffic source (from client)
+      referrer: ctx.referrer,
+      utm_source: ctx.utm_source,
+      utm_medium: ctx.utm_medium,
+      utm_campaign: ctx.utm_campaign,
     };
+
+    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+    const url = `https://${projectId}.supabase.co/functions/v1/track-event`;
 
     if (eventType === 'page_leave') {
       // Use keepalive fetch to ensure payload is sent when tab is closing
-      const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/video_analytics`;
-      const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
       fetch(url, {
         method: 'POST',
-        headers: {
-          'apikey': key,
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         keepalive: true,
-      }).catch(console.error);
+      }).catch(() => {});
     } else {
-      await supabase.from('video_analytics').insert(payload);
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
     }
   } catch (e) {
     console.error('Analytics tracking error:', e);

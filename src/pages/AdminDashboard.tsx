@@ -15,10 +15,11 @@ import { useToast } from '@/hooks/use-toast';
 import {
   Plus, Trash2, Edit2, BarChart3, Video, Eye, Play,
   DollarSign, Users, LogOut, X, Save, Upload, CheckCircle2, Link,
-  Receipt, RefreshCw
+  Receipt, RefreshCw, Globe, Monitor, Smartphone, Compass, MousePointerClick, Activity
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend
 } from 'recharts';
 
 interface VideoRecord {
@@ -713,23 +714,22 @@ export default function AdminDashboard() {
               </Button>
             </CardHeader>
             <CardContent>
-              {summary && (
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-                  {[
-                    { label: 'Visitors', value: summary.page_visits, icon: Eye },
-                    { label: 'Play Starts', value: summary.play_starts, icon: Play },
-                    { label: 'Paywall Hits', value: summary.paywall_hits, icon: Users },
-                    { label: 'Payments', value: summary.payments, icon: DollarSign },
-                    { label: 'Avg Watch', value: `${summary.avg_watch}s`, icon: BarChart3 },
-                  ].map(({ label, value, icon: Icon }) => (
-                    <div key={label} className="bg-muted/50 border border-border rounded-xl p-3 text-center">
-                      <Icon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
-                      <div className="text-lg font-bold text-foreground">{value}</div>
-                      <div className="text-xs text-muted-foreground">{label}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* KPI Header */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+                {[
+                  { label: 'Unique Visitors', value: detailedAnalytics.unique_visitors, icon: Users },
+                  { label: 'Total Sessions', value: detailedAnalytics.total_sessions, icon: Activity },
+                  { label: 'Bounce Rate', value: `${detailedAnalytics.bounce_rate}%`, icon: LogOut },
+                  { label: 'Play Rate', value: `${detailedAnalytics.play_rate}%`, icon: Play },
+                  { label: 'Revenue', value: `$${(detailedAnalytics.funnel.successes * (videos.find(v => v.id === selectedAnalytics)?.price || 0)).toFixed(2)}`, icon: DollarSign },
+                ].map(({ label, value, icon: Icon }) => (
+                  <div key={label} className="bg-muted/50 border border-border rounded-xl p-3 text-center">
+                    <Icon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
+                    <div className="text-lg font-bold text-foreground">{value}</div>
+                    <div className="text-xs text-muted-foreground">{label}</div>
+                  </div>
+                ))}
+              </div>
 
               {/* Advanced Funnel UI */}
               <div className="mb-8 space-y-4">
@@ -766,6 +766,109 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                {/* Traffic Sources & UTMs */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Traffic Sources</h3>
+                  <div className="bg-muted/30 border border-border rounded-xl p-4 h-full">
+                    {Object.keys(detailedAnalytics.traffic_sources).length > 0 ? (
+                      <div className="flex flex-col gap-6">
+                        <div className="h-[200px]">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={Object.entries(detailedAnalytics.traffic_sources).map(([name, value]) => ({ name, value }))}
+                                cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value"
+                              >
+                                {Object.entries(detailedAnalytics.traffic_sources).map((_, index) => (
+                                  <Cell key={`cell-${index}`} fill={['hsl(250, 65%, 55%)', 'hsl(200, 90%, 50%)', 'hsl(150, 70%, 40%)'][index % 3]} />
+                                ))}
+                              </Pie>
+                              <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px' }} />
+                              <Legend verticalAlign="bottom" height={36} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                        {detailedAnalytics.utm_campaigns.length > 0 && (
+                          <div className="text-sm">
+                            <div className="font-medium mb-2 text-muted-foreground text-xs uppercase tracking-wider">Top UTM Campaigns</div>
+                            <div className="space-y-2">
+                              {detailedAnalytics.utm_campaigns.slice(0, 3).map((u: any, i: number) => (
+                                <div key={i} className="flex justify-between items-center bg-background/50 px-3 py-2 rounded border border-border/50">
+                                  <div className="min-w-0 flex-1 pr-2">
+                                    <div className="text-foreground truncate font-medium">{u.campaign || 'No Campaign'}</div>
+                                    <div className="text-[10px] text-muted-foreground">{u.source} / {u.medium || 'none'}</div>
+                                  </div>
+                                  <div className="text-right text-xs">
+                                    <div className="font-bold text-foreground">{u.visits} visits</div>
+                                    <div className="text-success">{u.payments} payments</div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex h-[200px] items-center justify-center text-muted-foreground text-sm">No traffic data</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Geographic & Device Dashboard */}
+                <div className="space-y-4">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Demographics</h3>
+                  <div className="bg-muted/30 border border-border rounded-xl p-4 h-full flex flex-col gap-6">
+                    {/* Countries */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3 text-sm font-medium text-foreground">
+                        <Globe className="w-4 h-4 text-muted-foreground" /> Top Countries
+                      </div>
+                      {detailedAnalytics.countries.length > 0 ? (
+                        <div className="space-y-2">
+                          {detailedAnalytics.countries.slice(0, 4).map((c: any) => (
+                            <div key={c.code} className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground flex items-center gap-2 truncate">
+                                <img src={`https://flagcdn.com/16x12/${c.code.toLowerCase()}.png`} alt={c.country} className="rounded-sm" />
+                                {c.country}
+                              </span>
+                              <span className="font-medium text-foreground">{c.visits} <span className="text-muted-foreground text-xs font-normal">({c.payments} paid)</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground text-center py-2">No location data</div>
+                      )}
+                    </div>
+
+                    {/* Devices */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-3 text-sm font-medium text-foreground">
+                        <Monitor className="w-4 h-4 text-muted-foreground" /> Devices & Browsers
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          {Object.entries(detailedAnalytics.devices || {}).sort((a: any, b: any) => b[1] - a[1]).map(([dev, count]: any) => (
+                            <div key={dev} className="flex justify-between text-xs">
+                              <span className="text-muted-foreground capitalize">{dev}</span>
+                              <span className="font-medium text-foreground">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="space-y-2 border-l border-border/50 pl-4">
+                          {Object.entries(detailedAnalytics.browsers || {}).sort((a: any, b: any) => b[1] - a[1]).slice(0, 3).map(([br, count]: any) => (
+                            <div key={br} className="flex justify-between text-xs">
+                              <span className="text-muted-foreground truncate pr-2">{br}</span>
+                              <span className="font-medium text-foreground">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Engagement UI */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div>
@@ -774,11 +877,11 @@ export default function AdminDashboard() {
                     <div className="text-4xl font-bold text-foreground mb-1">
                       {Math.floor(detailedAnalytics.engagement.avg_time_on_page / 60)}m {detailedAnalytics.engagement.avg_time_on_page % 60}s
                     </div>
-                    <div className="text-xs text-muted-foreground">Average wait before leaving</div>
+                    <div className="text-xs text-muted-foreground">Average wait before leaving (bouncers ignored)</div>
                   </div>
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Preview Drop-off</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">Preview Retention</h3>
                   <div className="bg-muted/30 border border-border rounded-xl p-4 flex items-center justify-around h-[120px]">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-foreground">{detailedAnalytics.engagement.progress['25']}</div>
@@ -796,64 +899,69 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Error Diagnostic Logs */}
-              {detailedAnalytics.errors.length > 0 && (
-                <div className="mb-8">
-                  <h3 className="text-sm font-semibold text-destructive uppercase tracking-wider mb-2">Payment Diagnostic Logs</h3>
-                  <div className="bg-muted/30 border border-destructive/30 rounded-xl overflow-hidden text-sm">
-                    <div className="max-h-60 overflow-y-auto custom-scrollbar">
-                      <table className="w-full text-left">
-                        <thead className="bg-destructive/10 text-destructive text-xs uppercase sticky top-0 backdrop-blur-md">
-                          <tr>
-                            <th className="px-4 py-3 font-medium">Time (Local)</th>
-                            <th className="px-4 py-3 font-medium">Session ID</th>
-                            <th className="px-4 py-3 font-medium">Error Message</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/50">
-                          {detailedAnalytics.errors.map((err: any) => (
-                            <tr key={err.id} className="hover:bg-muted/50 transition-colors">
-                              <td className="px-4 py-3 whitespace-nowrap text-muted-foreground text-xs">
-                                {new Date(err.created_at).toLocaleString()}
-                              </td>
-                              <td className="px-4 py-3 font-mono text-[10px] text-muted-foreground">
-                                {err.session_id ? err.session_id.split('-')[0] + '...' : 'Unknown'}
-                              </td>
-                              <td className="px-4 py-3 text-foreground break-words max-w-sm">
-                                <span className="inline-block bg-destructive/10 text-destructive text-xs px-2 py-1 rounded">
-                                  {err.message}
-                                </span>
-                              </td>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Payment Diagnostic Logs */}
+                {detailedAnalytics.errors?.length > 0 && (
+                  <div className="h-full">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Payment Error Diagnostics</h3>
+                      <span className="text-xs font-medium bg-destructive/10 text-destructive px-2 py-1 rounded-full">{detailedAnalytics.errors.length} Failures</span>
+                    </div>
+                    <div className="bg-muted/30 border border-border rounded-xl overflow-hidden max-h-[300px] overflow-y-auto">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-muted/50 text-muted-foreground text-xs uppercase font-medium">
+                            <tr>
+                              <th className="px-4 py-3 border-b border-border font-medium">Time (Local)</th>
+                              <th className="px-4 py-3 border-b border-border font-medium">Context</th>
+                              <th className="px-4 py-3 border-b border-border font-medium">Exact Error Message</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y divide-border/50">
+                            {detailedAnalytics.errors.map((err: any) => (
+                              <tr key={err.id} className="hover:bg-muted/50 transition-colors">
+                                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                                  {new Date(err.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground text-xs">
+                                  {err.country && <span className="block">{err.country}</span>}
+                                  {err.device && <span className="block capitalize">{err.device} · {err.browser}</span>}
+                                </td>
+                                <td className="px-4 py-3 text-foreground font-mono text-xs">
+                                  <span className="inline-block bg-destructive/10 text-destructive text-xs px-2 py-1 rounded border border-destructive/20 break-all max-w-[200px] sm:max-w-xs">
+                                    {err.message}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Activity Trend Chart */}
-              {detailedAnalytics.trend?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Activity Trend</h3>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={detailedAnalytics.trend}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" vertical={false} />
-                      <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
-                      <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px', color: 'hsl(0 0% 98%)' }} cursor={{ fill: 'hsl(240 3.7% 15%)' }} />
-                      <Bar dataKey="visits" fill="hsl(250, 65%, 55%)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="payments" fill="hsl(35, 95%, 55%)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+                {/* Activity Trend Chart */}
+                {detailedAnalytics.trend?.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Activity Trend</h3>
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={detailedAnalytics.trend}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" vertical={false} />
+                        <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
+                        <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px', color: 'hsl(0 0% 98%)' }} cursor={{ fill: 'hsl(240 3.7% 15%)' }} />
+                        <Bar dataKey="visits" fill="hsl(250, 65%, 55%)" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="payments" fill="hsl(35, 95%, 55%)" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
       </main>
-
       {/* Transactions Tab */}
       {activeTab === 'transactions' && (
         <main className="max-w-6xl mx-auto px-4 py-6">
