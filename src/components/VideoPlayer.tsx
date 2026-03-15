@@ -39,6 +39,11 @@ export default function VideoPlayer({
       setIsPlaying(false);
       setPreviewEnded(true);
 
+      // CRITICAL: Force kill the video source to eject iOS native player
+      // If we don't do this, users can just hit play in the native OS player and bypass
+      video.removeAttribute('src');
+      video.load();
+
       // Exit fullscreen before showing paywall
       const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
       if (fsEl) {
@@ -107,7 +112,10 @@ export default function VideoPlayer({
       }
     };
 
-    tryAutoplay();
+    // If source was removed by kill switch, ignore
+    if (video.hasAttribute('src')) {
+      tryAutoplay();
+    }
   }, [videoUrl, videoId, hasStarted]);
 
   useEffect(() => {
@@ -115,11 +123,16 @@ export default function VideoPlayer({
       setPreviewEnded(false);
       const video = videoRef.current;
       if (video) {
+        // Restore the source if it was killed by the paywall
+        if (!video.hasAttribute('src')) {
+          video.src = videoUrl;
+          video.currentTime = previewDuration; // Start where left off
+        }
         video.play();
         setIsPlaying(true);
       }
     }
-  }, [isUnlocked, previewEnded]);
+  }, [isUnlocked, previewEnded, videoUrl, previewDuration]);
 
   const togglePlay = () => {
     const video = videoRef.current;

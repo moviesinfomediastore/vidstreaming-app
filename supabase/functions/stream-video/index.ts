@@ -33,7 +33,7 @@ serve(async (req) => {
     // Fetch video metadata
     const { data: video, error } = await supabase
       .from('videos')
-      .select('video_path, chunk_count, total_bytes, chunk_prefix, is_published')
+      .select('video_path, chunk_count, total_bytes, chunk_prefix, is_published, preview_duration_seconds')
       .eq('id', videoId)
       .single();
 
@@ -42,6 +42,7 @@ serve(async (req) => {
     }
 
     // --- Access control ---
+    let isFullAccess = false;
     if (accessType === 'full') {
       if (!sessionToken) {
         return new Response('Payment required', { status: 403, headers: corsHeaders });
@@ -57,11 +58,12 @@ serve(async (req) => {
       if (!payment) {
         return new Response('Invalid session', { status: 403, headers: corsHeaders });
       }
+      isFullAccess = true;
     }
 
     // --- Legacy single-file videos: redirect to signed URL ---
     if (!video.chunk_count || !video.chunk_prefix) {
-      const expirySeconds = accessType === 'full' ? 3600 : 60;
+      const expirySeconds = isFullAccess ? 3600 : 60;
       const { data: signedUrl } = await supabase.storage
         .from('videos')
         .createSignedUrl(video.video_path, expirySeconds);
@@ -95,6 +97,29 @@ serve(async (req) => {
 
     // Clamp end
     if (end >= totalBytes) end = totalBytes - 1;
+
+    // --- Backend Preview Security (Byte-Range Clipping) ---
+    // If user hasn't paid, we block them from downloading the rest of the video
+    if (!isFullAccess) {
+      // Allow 3 MB per second of preview (very high bitrate safety margin)
+      const previewDuration = video.preview_duration_seconds || 60;
+      const maxAllowedBytes = previewDuration * 3 * 1024 * 1024;
+      const moovAtomSafetyLimit = totalBytes - (1 * 1024 * 1024); // Last 1MB (for moov atom)
+
+      // If the start byte is in the restricted middle zone, reject it
+      if (start > maxAllowedBytes && start < moovAtomSafetyLimit) {
+        console.warn(`Preview security blocked range request: start=${start}, allowed=${maxAllowedBytes}`);
+        return new Response('Preview restrict: out of bounds', {
+          status: 403,
+          headers: corsHeaders,
+        });
+      }
+
+      // If they request a range that crosses the boundary, clamp the end
+      if (start <= maxAllowedBytes && end > maxAllowedBytes) {
+        end = maxAllowedBytes;
+      }
+    }
 
     // Determine which chunk contains 'start'
     const chunkIndex = Math.floor(start / CHUNK_SIZE);
