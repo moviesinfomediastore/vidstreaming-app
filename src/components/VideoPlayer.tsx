@@ -40,12 +40,18 @@ export default function VideoPlayer({
       setPreviewEnded(true);
 
       // Exit fullscreen before showing paywall
-      if (document.fullscreenElement) {
-        document.exitFullscreen().then(() => {
+      const fsEl = document.fullscreenElement || (document as any).webkitFullscreenElement;
+      if (fsEl) {
+        const exitFn = document.exitFullscreen
+          ? () => document.exitFullscreen()
+          : (document as any).webkitExitFullscreen
+            ? () => (document as any).webkitExitFullscreen()
+            : null;
+        if (exitFn) {
+          Promise.resolve(exitFn()).then(() => onPreviewEnd()).catch(() => onPreviewEnd());
+        } else {
           onPreviewEnd();
-        }).catch(() => {
-          onPreviewEnd();
-        });
+        }
       } else {
         onPreviewEnd();
       }
@@ -54,13 +60,32 @@ export default function VideoPlayer({
     }
   }, [isUnlocked, previewDuration, previewEnded, onPreviewEnd, videoId]);
 
-  // Listen for fullscreen changes
+  // Listen for fullscreen changes (standard + webkit for iOS)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const fsElement = document.fullscreenElement
+        || (document as any).webkitFullscreenElement
+        || null;
+      setIsFullscreen(!!fsElement);
     };
+
+    // Also detect iOS native video fullscreen via the video element
+    const video = videoRef.current;
+    const handleWebkitFS = () => {
+      setIsFullscreen(!!(video as any)?.webkitDisplayingFullscreen);
+    };
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    video?.addEventListener('webkitbeginfullscreen', () => setIsFullscreen(true));
+    video?.addEventListener('webkitendfullscreen', () => setIsFullscreen(false));
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      video?.removeEventListener('webkitbeginfullscreen', handleWebkitFS);
+      video?.removeEventListener('webkitendfullscreen', handleWebkitFS);
+    };
   }, []);
 
   useEffect(() => {
@@ -119,15 +144,44 @@ export default function VideoPlayer({
     setIsMuted(video.muted);
   };
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = async () => {
+    const video = videoRef.current;
     const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      // Only allow fullscreen if unlocked or preview hasn't ended
-      if (!isUnlocked && previewEnded) return;
-      wrapper.requestFullscreen();
+    if (!video || !wrapper) return;
+
+    // Exit fullscreen
+    const fsElement = document.fullscreenElement
+      || (document as any).webkitFullscreenElement;
+    if (fsElement) {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      }
+      return;
+    }
+
+    // Only allow fullscreen if unlocked or preview hasn't ended
+    if (!isUnlocked && previewEnded) return;
+
+    // Strategy: try video element fullscreen first (works best on mobile)
+    // iOS Safari: only supports webkitEnterFullscreen on <video> elements
+    // Android Chrome: supports requestFullscreen on any element
+    try {
+      if ((video as any).webkitEnterFullscreen) {
+        // iOS Safari — native video fullscreen (best mobile experience)
+        (video as any).webkitEnterFullscreen();
+      } else if (video.requestFullscreen) {
+        // Android / modern browsers — fullscreen the video directly
+        await video.requestFullscreen();
+      } else if (wrapper.requestFullscreen) {
+        // Desktop fallback — fullscreen the wrapper div
+        await wrapper.requestFullscreen();
+      } else if ((wrapper as any).webkitRequestFullscreen) {
+        (wrapper as any).webkitRequestFullscreen();
+      }
+    } catch (err) {
+      console.warn('Fullscreen request failed:', err);
     }
   };
 
