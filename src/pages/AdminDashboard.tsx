@@ -493,9 +493,9 @@ export default function AdminDashboard() {
   const summary = analytics[selectedAnalytics || ''];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <header className="border-b border-border bg-card sticky top-0 z-10">
+      <header className="border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <h1 className="text-lg font-bold font-heading flex items-center gap-2">
             <Video className="w-5 h-5 text-primary" /> Admin Panel
@@ -533,7 +533,7 @@ export default function AdminDashboard() {
       <main className={`max-w-6xl mx-auto px-4 py-6 ${activeTab !== 'videos' ? 'hidden' : ''}`}>
         {/* Video Form */}
         {showForm && (
-          <Card className="mb-6">
+          <Card className="mb-6 bg-card border-border">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-heading text-base">
                 {editingId ? 'Edit Video' : 'New Video'}
@@ -636,7 +636,7 @@ export default function AdminDashboard() {
           {videos.map((v) => {
             const a = analytics[v.id];
             return (
-              <Card key={v.id} className="p-4">
+              <Card key={v.id} className="p-4 bg-card border-border hover:border-primary/30 transition-colors">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -682,7 +682,7 @@ export default function AdminDashboard() {
 
         {/* Analytics Detail */}
         {selectedAnalytics && (
-          <Card className="mt-6">
+          <Card className="mt-6 bg-card border-border">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="font-heading text-base">Analytics</CardTitle>
               <Button size="icon" variant="ghost" onClick={() => setSelectedAnalytics(null)}>
@@ -699,7 +699,7 @@ export default function AdminDashboard() {
                     { label: 'Payments', value: summary.payments, icon: DollarSign },
                     { label: 'Avg Watch', value: `${summary.avg_watch}s`, icon: BarChart3 },
                   ].map(({ label, value, icon: Icon }) => (
-                    <div key={label} className="bg-muted rounded-xl p-3 text-center">
+                    <div key={label} className="bg-muted/50 border border-border rounded-xl p-3 text-center">
                       <Icon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
                       <div className="text-lg font-bold text-foreground">{value}</div>
                       <div className="text-xs text-muted-foreground">{label}</div>
@@ -710,10 +710,10 @@ export default function AdminDashboard() {
               {detailedAnalytics.length > 0 && (
                 <ResponsiveContainer width="100%" height={250}>
                   <BarChart data={detailedAnalytics}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" />
+                    <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} />
+                    <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} />
+                    <Tooltip contentStyle={{ backgroundColor: 'hsl(240 10% 10%)', border: '1px solid hsl(240 3.7% 25%)', borderRadius: '8px', color: 'hsl(0 0% 98%)' }} />
                     <Bar dataKey="visits" fill="hsl(250, 65%, 55%)" />
                     <Bar dataKey="payments" fill="hsl(35, 95%, 55%)" />
                   </BarChart>
@@ -741,17 +741,17 @@ export default function AdminDashboard() {
             <div className="space-y-2">
               {/* Summary */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-                <Card className="p-3 text-center">
+                <Card className="p-3 text-center bg-card border-border">
                   <div className="text-2xl font-bold text-foreground">{transactions.length}</div>
                   <div className="text-xs text-muted-foreground">Total Transactions</div>
                 </Card>
-                <Card className="p-3 text-center">
+                <Card className="p-3 text-center bg-card border-border">
                   <div className="text-2xl font-bold text-success">
                     ${transactions.filter(t => t.status === 'completed').reduce((sum, t) => sum + Number(t.amount), 0).toFixed(2)}
                   </div>
                   <div className="text-xs text-muted-foreground">Total Revenue</div>
                 </Card>
-                <Card className="p-3 text-center">
+                <Card className="p-3 text-center bg-card border-border">
                   <div className="text-2xl font-bold text-foreground">
                     {transactions.filter(t => t.status === 'completed').length}
                   </div>
@@ -760,7 +760,7 @@ export default function AdminDashboard() {
               </div>
               {/* Transaction list */}
               {transactions.map(t => (
-                <Card key={t.id} className="p-3">
+                <Card key={t.id} className="p-3 bg-card border-border">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm text-foreground truncate">{t.video_title || t.video_id}</p>
@@ -774,7 +774,7 @@ export default function AdminDashboard() {
                     <div className="text-right shrink-0">
                       <div className="font-bold text-foreground">${Number(t.amount).toFixed(2)}</div>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        t.status === 'completed' ? 'bg-success/10 text-success' : 'bg-yellow-100 text-yellow-700'
+                        t.status === 'completed' ? 'bg-success/10 text-success' : 'bg-amber-500/15 text-amber-400'
                       }`}>
                         {t.status}
                       </span>

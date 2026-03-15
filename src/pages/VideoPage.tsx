@@ -6,7 +6,7 @@ import { getSessionToken, setSessionToken } from '@/lib/visitor';
 import VideoPlayer from '@/components/VideoPlayer';
 import PaywallOverlay from '@/components/PaywallOverlay';
 import Footer from '@/components/Footer';
-import { Clock, DollarSign, CheckCircle, Play, Eye, Users } from 'lucide-react';
+import { Clock, DollarSign, CheckCircle, Play, Eye, Users, Shield, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Video {
@@ -171,6 +171,24 @@ export default function VideoPage() {
     };
     fetchVideo();
   }, [slug, searchParams]);
+
+  // Dynamic SEO — set document title and meta description
+  useEffect(() => {
+    if (video) {
+      document.title = `${video.title} – Vidstreaming`;
+      const metaDesc = document.querySelector('meta[name="description"]');
+      const desc = video.description || `Watch ${video.title} on Vidstreaming. Pay-per-view premium video content.`;
+      if (metaDesc) {
+        metaDesc.setAttribute('content', desc);
+      } else {
+        const meta = document.createElement('meta');
+        meta.name = 'description';
+        meta.content = desc;
+        document.head.appendChild(meta);
+      }
+    }
+    return () => { document.title = 'Vidstreaming – Premium Video Content'; };
+  }, [video]);
 
   // Also fetch video on PayPal callback
   useEffect(() => {
@@ -409,6 +427,33 @@ export default function VideoPage() {
               </div>
             </div>
           )}
+
+          {/* Secure streaming info — fills empty space on mobile */}
+          <div className="border-t border-white/[0.06] pt-5 mt-2 max-w-md space-y-3">
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Shield className="w-4 h-4 text-primary" /> Secure Streaming
+            </h2>
+            <div className="space-y-2.5">
+              <div className="flex items-start gap-2.5">
+                <Lock className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Encrypted video delivery — content is streamed securely and cannot be downloaded.
+                </p>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <DollarSign className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Payments processed via PayPal — your card details never touch our servers.
+                </p>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <CheckCircle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Instant access after purchase — watch immediately, no account needed.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </main>
 

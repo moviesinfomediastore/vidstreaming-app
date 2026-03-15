@@ -170,11 +170,11 @@ export default function VideoPlayer({
         crossOrigin="anonymous"
       />
 
-      {/* Custom controls overlay */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 sm:p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+      {/* Custom controls overlay — always visible on mobile, hover-show on desktop */}
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 sm:p-4 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10">
         {/* Progress bar */}
         <div
-          className="w-full h-1 sm:h-1.5 bg-white/20 rounded-full cursor-pointer mb-2 sm:mb-3 relative group/progress"
+          className="w-full h-1.5 sm:h-1.5 bg-white/20 rounded-full cursor-pointer mb-2 sm:mb-3 relative group/progress"
           onClick={handleSeek}
         >
           <div
