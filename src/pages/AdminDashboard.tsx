@@ -96,6 +96,7 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedAnalytics, setSelectedAnalytics] = useState<string | null>(null);
   const [detailedAnalytics, setDetailedAnalytics] = useState<any | null>(null);
+  const [timeRange, setTimeRange] = useState<string>('all');
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -272,7 +273,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchDetailedAnalytics = async (videoId: string) => {
+  const fetchDetailedAnalytics = async (videoId: string, range = timeRange) => {
     const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
     try {
       const res = await fetch(
@@ -280,16 +281,22 @@ export default function AdminDashboard() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'analytics', videoId, adminToken: sessionStorage.getItem('ppv_admin') }),
+          body: JSON.stringify({ action: 'analytics', videoId, timeRange: range, adminToken: sessionStorage.getItem('ppv_admin') }),
         }
       );
       const data = await res.json();
-      if (data.daily) setDetailedAnalytics(data);
+      if (data.trend) setDetailedAnalytics(data);
     } catch {
       setDetailedAnalytics(null);
     }
     setSelectedAnalytics(videoId);
   };
+
+  useEffect(() => {
+    if (selectedAnalytics) {
+      fetchDetailedAnalytics(selectedAnalytics, timeRange);
+    }
+  }, [timeRange]);
 
   const handleSave = async () => {
     setUploading(true);
@@ -683,9 +690,25 @@ export default function AdminDashboard() {
         {/* Analytics Detail */}
         {selectedAnalytics && detailedAnalytics && (
           <Card className="mt-6 bg-card border-border">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="font-heading text-base">Advanced Analytics</CardTitle>
-              <Button size="icon" variant="ghost" onClick={() => setSelectedAnalytics(null)}>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
+                <CardTitle className="font-heading text-base">Advanced Analytics</CardTitle>
+                <select 
+                  className="bg-background text-foreground text-sm font-medium border border-border rounded-md px-3 py-1 outline-none ring-offset-background focus:ring-2 focus:ring-primary focus:ring-offset-2 appearance-none cursor-pointer"
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value)}
+                >
+                  <option value="5m">Last 5 Minutes</option>
+                  <option value="30m">Last 30 Minutes</option>
+                  <option value="1h">Last 1 Hour</option>
+                  <option value="10h">Last 10 Hours</option>
+                  <option value="12h">Last 12 Hours</option>
+                  <option value="24h">Last 24 Hours</option>
+                  <option value="7d">Last 7 Days</option>
+                  <option value="all">All Time</option>
+                </select>
+              </div>
+              <Button size="icon" variant="ghost" className="hidden sm:inline-flex" onClick={() => setSelectedAnalytics(null)}>
                 <X className="w-4 h-4" />
               </Button>
             </CardHeader>
@@ -810,12 +833,12 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Daily Trend Chart */}
-              {detailedAnalytics.daily?.length > 0 && (
+              {/* Activity Trend Chart */}
+              {detailedAnalytics.trend?.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Daily Trend</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Activity Trend</h3>
                   <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={detailedAnalytics.daily}>
+                    <BarChart data={detailedAnalytics.trend}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 3.7% 25%)" vertical={false} />
                       <XAxis dataKey="date" stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />
                       <YAxis stroke="hsl(240 5% 64.9%)" tick={{ fill: 'hsl(240 5% 64.9%)' }} axisLine={false} tickLine={false} />

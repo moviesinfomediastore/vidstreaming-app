@@ -99,37 +99,69 @@ serve(async (req) => {
     }
 
     if (action === 'analytics') {
-      // Get all advanced analytics for a specific video
-      const { data: events } = await supabase
+      const { timeRange = 'all' } = body;
+      
+      let query = supabase
         .from('video_analytics')
         .select('*')
         .eq('video_id', videoId)
         .order('created_at', { ascending: true });
 
+      if (timeRange !== 'all') {
+        const now = new Date();
+        let ms = 0;
+        if (timeRange === '5m') ms = 5 * 60 * 1000;
+        else if (timeRange === '30m') ms = 30 * 60 * 1000;
+        else if (timeRange === '1h') ms = 60 * 60 * 1000;
+        else if (timeRange === '10h') ms = 10 * 60 * 60 * 1000;
+        else if (timeRange === '12h') ms = 12 * 60 * 60 * 1000;
+        else if (timeRange === '24h') ms = 24 * 60 * 60 * 1000;
+        else if (timeRange === '7d') ms = 7 * 24 * 60 * 60 * 1000;
+        else if (timeRange === '1d') ms = 24 * 60 * 60 * 1000; // alias for 24h
+
+        if (ms > 0) {
+          const limitDate = new Date(now.getTime() - ms);
+          query = query.gte('created_at', limitDate.toISOString());
+        }
+      }
+
+      const { data: events } = await query;
+
       if (!events || events.length === 0) {
-        return new Response(JSON.stringify({ daily: [], funnel: {}, errors: [], engagement: {} }), {
+        return new Response(JSON.stringify({ trend: [], funnel: {}, errors: [], engagement: {} }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const dailyMap: Record<string, { visits: number; payments: number }> = {};
+      const trendMap: Record<string, { visits: number; payments: number }> = {};
       const funnel = { visits: 0, starts: 0, paywalls: 0, payment_clicks: 0, successes: 0 };
       const errors: any[] = [];
       let totalTimeOnPage = 0;
       let pageLeaveCount = 0;
       const progress = { '25': 0, '50': 0, '75': 0 };
 
+      // Determine grouping format based on time range
+      const isMinutes = ['5m', '30m', '1h'].includes(timeRange);
+      const isHours = ['10h', '12h', '24h', '1d'].includes(timeRange);
+
       for (const e of events) {
-        const date = e.created_at.split('T')[0];
-        if (!dailyMap[date]) dailyMap[date] = { visits: 0, payments: 0 };
+        // Grouping: Day by default, Hour or Minute if zooming in
+        let timeKey = e.created_at.split('T')[0];
+        if (isMinutes) {
+          timeKey = e.created_at.substring(0, 16).replace('T', ' '); // YYYY-MM-DD HH:mm
+        } else if (isHours) {
+          timeKey = e.created_at.substring(0, 13).replace('T', ' ') + ':00'; // YYYY-MM-DD HH:00
+        }
+
+        if (!trendMap[timeKey]) trendMap[timeKey] = { visits: 0, payments: 0 };
 
         switch (e.event_type) {
           case 'page_visit': 
-            dailyMap[date].visits++; 
+            trendMap[timeKey].visits++; 
             funnel.visits++; 
             break;
           case 'payment_completed': 
-            dailyMap[date].payments++; 
+            trendMap[timeKey].payments++; 
             funnel.successes++; 
             break;
           case 'play_start': 
@@ -163,7 +195,7 @@ serve(async (req) => {
         }
       }
 
-      const daily = Object.entries(dailyMap).map(([date, data]) => ({ date, ...data }));
+      const trend = Object.entries(trendMap).map(([date, data]) => ({ date, ...data }));
       const engagement = {
         avg_time_on_page: pageLeaveCount > 0 ? Math.round(totalTimeOnPage / pageLeaveCount) : 0,
         progress
@@ -172,7 +204,7 @@ serve(async (req) => {
       // Sort errors newest first
       errors.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      return new Response(JSON.stringify({ daily, funnel, errors, engagement }), {
+      return new Response(JSON.stringify({ trend, funnel, errors, engagement }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

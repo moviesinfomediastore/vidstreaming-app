@@ -1,5 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
-import { getVisitorId } from './visitor';
+import { getVisitorId, generateUUID } from './visitor';
 
 export type EventType = 
   | 'page_visit' 
@@ -15,7 +15,7 @@ export type EventType =
 export function getSessionId(): string {
   let sessionId = sessionStorage.getItem('analytics_session_id');
   if (!sessionId) {
-    sessionId = crypto.randomUUID();
+    sessionId = generateUUID();
     sessionStorage.setItem('analytics_session_id', sessionId);
   }
   return sessionId;
