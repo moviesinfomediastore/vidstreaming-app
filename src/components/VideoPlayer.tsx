@@ -226,7 +226,11 @@ export default function VideoPlayer({
         ref={videoRef}
         src={videoUrl}
         className="w-full aspect-video object-contain bg-black"
-        style={{ userSelect: 'none', WebkitTouchCallout: 'none' } as React.CSSProperties}
+        style={{ 
+          userSelect: 'none', 
+          WebkitTouchCallout: 'none',
+          pointerEvents: isUnlocked ? 'auto' : 'none' 
+        } as React.CSSProperties}
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={() => setDuration(videoRef.current?.duration || 0)}
         onContextMenu={(e) => e.preventDefault()}
@@ -270,16 +274,17 @@ export default function VideoPlayer({
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
-          <button
-            onClick={toggleFullscreen}
-            className="text-white hover:text-primary transition-colors p-1"
-            disabled={!isUnlocked && previewEnded}
-          >
-            {isFullscreen
-              ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5" />
-              : <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
-            }
-          </button>
+          {isUnlocked && (
+            <button
+              onClick={toggleFullscreen}
+              className="text-white hover:text-primary transition-colors p-1"
+            >
+              {isFullscreen
+                ? <Minimize className="w-4 h-4 sm:w-5 sm:h-5" />
+                : <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
+              }
+            </button>
+          )}
         </div>
       </div>
 
